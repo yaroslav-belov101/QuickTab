@@ -1,0 +1,13 @@
+# QuickTab Linux (Firefox) - requirements.txt
+# =============================================
+SpeechRecognition==3.10.0     # Голосовое распознавание
+pyaudio==0.2.11               # Микрофон (требует portaudio19-dev)
+selenium==4.15.2              # Firefox WebDriver
+webdriver-manager==4.0.1      # GeckoDriver автоматически
+prompt_toolkit==3.0.43        # Красивый CLI
+Pyyaml==6.0.1                 # commands.yaml
+colorama==0.4.6               # Цветной вывод
+plyer==2.1.0                  # Уведомления
+schedule==1.2.0               # Планировщик
+python-dotenv==1.0.0          # .env файлы
+beautifulsoup4                # Парсинг и очистка HTML/XML
