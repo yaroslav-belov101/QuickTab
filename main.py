@@ -37,10 +37,8 @@ def kill_firefox_processes():
         pass
 
 def get_firefox_default_profile():
-    """Находим ТОЧНО default-release профиль"""
     profiles_path = Path.home() / ".mozilla" / "firefox"
     
-    # 🔥 Ищем ТОЛЬКО default-release
     default = None
     for profile in profiles_path.glob("*default"):
         default_release = profile
@@ -98,25 +96,25 @@ def init_firefox():
     try:
         firefox_options = FirefoxOptions()
         
-        # 🔥 КРИТИЧЕСКИЕ ОПЦИИ ДЛЯ DEFAULT PROFILE
+        # КРИТИЧЕСКИЕ ОПЦИИ ДЛЯ DEFAULT PROFILE
         firefox_options.add_argument("--disable-web-security")
         firefox_options.add_argument("--no-sandbox")
         firefox_options.add_argument("--disable-gpu")
         firefox_options.add_argument("--disable-dev-shm-usage")
         
-        # 🔥 ОТКЛЮЧАЕМ ВСЕ НАСТРОЙКИ WEBDRIVER ДЛЯ DEFAULT
+        # ОТКЛЮЧАЕМ ВСЕ НАСТРОЙКИ WEBDRIVER ДЛЯ DEFAULT
         firefox_options.set_preference("dom.webdriver.enabled", False)
         firefox_options.set_preference("useAutomationExtension", False)
         firefox_options.set_preference("marionette.log.level", "FATAL")
         
-        # 🔥 ИСПОЛЬЗУЕМ ТОЛЬКО DEFAULT-RELEASE
+        # ИСПОЛЬЗУЕМ ТОЛЬКО DEFAULT-RELEASE
         profile_path = get_firefox_default_profile()
         firefox_options.add_argument(f"-profile")
         firefox_options.add_argument(profile_path)
         
         print(f"📁 Профиль: {profile_path}")
         
-        # 🔥 Geckodriver с логами
+        # Geckodriver с логами
         firefox_service = FirefoxService()
         firefox_driver = webdriver.Firefox(service=firefox_service, options=firefox_options)
         driver = firefox_driver
