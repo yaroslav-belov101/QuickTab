@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quicktab"
+version = "0.0.1"          
+authors = [{name = "Yaroslav Belov"}]
+description = "QuickTab"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+dependencies = [
+    "selenium>=4.15",
+    "beautifulsoup4>=4.12",
+    "webdriver-manager>=4.0"
+]
+
+[project.scripts]
+quicktab = "quicktab.main:run_quicktab"

@@ -17,7 +17,11 @@ import subprocess
 from bs4 import BeautifulSoup
 from pathlib import Path
 
-print("🚀 QuickTab: FIREFOX DEFAULT + CHROMIUM | ARCH LINUX")
+try:
+    from quicktab import __version__
+except ImportError:
+    __version__ = "0.0.1"
+print(f"🚀 QuickTab v{__version__}")
 
 driver = None
 temp_profile = None
