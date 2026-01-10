@@ -15,6 +15,10 @@ import sys
 import subprocess
 from pathlib import Path
 
+<<<<<<< HEAD
+=======
+# Импорты модулей
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
 from weather import get_weather_data, print_weather, safe_driver_check, safe_refresh
 from currency import get_currency_data, print_currency
 
@@ -25,12 +29,22 @@ except ImportError:
 print(f"🚀 QuickTab v{__version__}")
 
 def show_menu():
+<<<<<<< HEAD
     print("\n" + "═"*70)
     print(" QUICKTAB | Что вы хотите посмотреть?")
     print("═"*70)
     print("1. 🌤️  ПОГОДА ")
     print("2. 💱  КУРСЫ ВАЛЮТ (ЦБ РФ)")
     print("3. 📊  ВСЕ ВМЕСТЕ")
+=======
+    """Меню выбора модулей"""
+    print("\n" + "═"*70)
+    print(" QUICKTAB | Что вы хотите посмотреть?")
+    print("═"*70)
+    print("1. 🌤️  ПОГОДА")
+    print("2. 💱  КУРСЫ ВАЛЮТ (ЦБ РФ)")
+    print("3. 📊  ВСЕ ВМЕСТЕ (ОТДЕЛЬНЫЕ ВКЛАДКИ)")
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
     print("═"*70)
     return input("Выберите (1-3): ").strip()
 
@@ -54,7 +68,7 @@ running = True
 firefox_driver = None
 
 def kill_firefox_processes():
-    """Принудительно убиваем Firefox процессы"""
+    """Убиваем Firefox процессы"""
     print("🧹 Убиваем Firefox...")
     try:
         subprocess.run(["pkill", "-f", "geckodriver"], capture_output=True)
@@ -179,20 +193,29 @@ try:
     if safe_driver_check(driver):
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         
+<<<<<<< HEAD
         tabs = {}  # Словарь вкладок: {index: module}
+=======
+        tabs = {}  # {tab_index: module}
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
         
         # ОТКРЫВАЕМ ВСЕ модули в НОВЫХ вкладках
         for i, module in enumerate(MODULES):
             if i > 0:  # Первая вкладка уже открыта
                 driver.execute_script("window.open('');")
+<<<<<<< HEAD
                 tab_handle = driver.window_handles[i]
                 driver.switch_to.window(tab_handle)
+=======
+                driver.switch_to.window(driver.window_handles[-1])
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
             
             if module == "weather":
                 driver.get("https://yandex.ru/pogoda/ru/belorechensk")
                 time.sleep(3)
                 data = get_weather_data(driver)
                 print_weather(data, browser_name)
+<<<<<<< HEAD
                 tabs[i] = module
             elif module == "currency":
                 driver.get("https://www.cbr.ru/currency_base/daily/")
@@ -206,6 +229,21 @@ try:
         if temp_profile: 
             print(f"🔒 Временный профиль: {temp_profile}")
         print(f"🆕 Открыто вкладок: {len(tabs)}")
+=======
+                tabs[len(driver.window_handles)-1] = module
+            elif module == "currency":
+                driver.get("https://www.cbr.ru/currency_base/daily/")
+                time.sleep(5)
+                data = get_currency_data(driver)
+                print_currency(data, browser_name)
+                tabs[len(driver.window_handles)-1] = module
+        
+        print("\n✅ QUICKTAB РАБОТАЕТ!")
+        print(f"🆕 Открыто вкладок: {len(tabs)}")
+        print("📍 Ctrl+C для выхода")
+        if temp_profile: 
+            print(f"🔒 Временный профиль: {temp_profile}")
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
 
         cycle = 1
         while running:
@@ -215,6 +253,7 @@ try:
             print(f"\n🔄 Обновление #{cycle}...")
             
             # ЦИКЛ по ВСЕМ вкладкам
+<<<<<<< HEAD
             for tab_index, module in tabs.items():
                 try:
                     driver.switch_to.window(driver.window_handles[tab_index])
@@ -228,6 +267,23 @@ try:
                             print_currency(data, browser_name)
                 except:
                     print(f"⚠️  Ошибка вкладки {tab_index}")
+=======
+            window_handles = driver.window_handles
+            for tab_index, module in tabs.items():
+                try:
+                    if tab_index < len(window_handles):
+                        driver.switch_to.window(window_handles[tab_index])
+                        
+                        if safe_refresh(driver):
+                            if module == "weather":
+                                data = get_weather_data(driver)
+                                print_weather(data, browser_name)
+                            elif module == "currency":
+                                data = get_currency_data(driver)
+                                print_currency(data, browser_name)
+                except Exception as e:
+                    print(f"⚠️ Ошибка вкладки {tab_index}: {e}")
+>>>>>>> d37d2a1 (QuickTab v0.1.0 (добаление курса валют))
                     continue
                     
             cycle += 1
