@@ -1,7 +1,6 @@
 <div align="center">
 
 # QuickTab v0.0.1
-[![Version](https://img.shields.io/github/v/release/yaroslav-belov101/QuickTab?color=%237159f5)](https://github.com/yaroslav-belov101/QuickTab/releases)
 
 </div>
 
