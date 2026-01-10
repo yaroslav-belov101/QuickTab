@@ -1,6 +1,6 @@
 <div align="center">
 
-# QuickTab v0.0.1
+# QuickTab v0.1.0
 
 </div>
 
