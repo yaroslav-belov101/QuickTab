@@ -6,12 +6,14 @@ import time
 import re
 from bs4 import BeautifulSoup
 
+
 def clean_text(text):
     """Очищает текст от HTML и лишних пробелов"""
     if not text: 
         return "Не найдено"
     soup = BeautifulSoup(text, 'html.parser')
     return re.sub(r'\s+', ' ', soup.get_text()).strip()[:80]
+
 
 def safe_driver_check(driver):
     """Проверяет, жив ли драйвер"""
@@ -22,6 +24,7 @@ def safe_driver_check(driver):
         return True
     except: 
         return False
+
 
 def safe_refresh(driver):
     """Безопасно обновляет страницу"""

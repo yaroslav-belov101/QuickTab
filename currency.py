@@ -6,11 +6,13 @@ import time
 import re
 from bs4 import BeautifulSoup
 
+
 def clean_text(text):
     if not text: 
         return "Не найдено"
     soup = BeautifulSoup(text, 'html.parser')
     return re.sub(r'\s+', ' ', soup.get_text()).strip()[:80]
+
 
 def safe_driver_check(driver):
     if not driver: 
@@ -21,6 +23,7 @@ def safe_driver_check(driver):
     except: 
         return False
 
+
 def safe_refresh(driver):
     if not safe_driver_check(driver):
         return False
@@ -30,6 +33,7 @@ def safe_refresh(driver):
         return True
     except:
         return False
+
 
 def get_currency_data(driver):
     if not safe_driver_check(driver):
@@ -73,6 +77,7 @@ def get_currency_data(driver):
         return {'usd': 'Ошибка', 'eur': 'Ошибка'}
     
     return {'usd': usd, 'eur': eur}
+
 
 def print_currency(currency_data, browser_name):
     print("\n" + "═"*70)
