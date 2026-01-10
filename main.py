@@ -8,20 +8,44 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 import time
-import re
 import os
 import tempfile
 import signal
 import sys
 import subprocess
-from bs4 import BeautifulSoup
 from pathlib import Path
+
+from weather import get_weather_data, print_weather, safe_driver_check, safe_refresh
+from currency import get_currency_data, print_currency
 
 try:
     from quicktab import __version__
 except ImportError:
-    __version__ = "0.0.1"
+    __version__ = "0.1.0"
 print(f"🚀 QuickTab v{__version__}")
+
+def show_menu():
+    print("\n" + "═"*70)
+    print(" QUICKTAB | Что вы хотите посмотреть?")
+    print("═"*70)
+    print("1. 🌤️  ПОГОДА ")
+    print("2. 💱  КУРСЫ ВАЛЮТ (ЦБ РФ)")
+    print("3. 📊  ВСЕ ВМЕСТЕ")
+    print("═"*70)
+    return input("Выберите (1-3): ").strip()
+
+choice = show_menu()
+if choice == "1":
+    MODULES = ["weather"]
+elif choice == "2":
+    MODULES = ["currency"]
+elif choice == "3":
+    MODULES = ["weather", "currency"]
+else:
+    print("❌ Неверный выбор, показываем ВСЁ")
+    MODULES = ["weather", "currency"]
+
+print(f"✅ Запуск модулей: {', '.join(MODULES)}")
 
 driver = None
 temp_profile = None
@@ -49,31 +73,14 @@ def get_firefox_default_profile():
         break
     
     if default_release:
-        print(f"🎯 НАЙДЕН default: {default}")
+        print(f"🎯 НАЙДЕН default: {default_release}")
         return str(default_release)
     
-    # Fallback: любой default*
     for profile in profiles_path.glob("*default*"):
         print(f"🎯 Используем default: {profile}")
         return str(profile)
     
     raise FileNotFoundError("default НЕ НАЙДЕН!")
-
-def safe_driver_check():
-    global driver
-    if not driver: return False
-    try:
-        driver.title
-        return True
-    except: return False
-
-def safe_refresh():
-    if not safe_driver_check(): return False
-    try:
-        driver.refresh()
-        time.sleep(3)
-        return True
-    except: return False
 
 def signal_handler(sig, frame):
     global running
@@ -85,13 +92,16 @@ def cleanup():
     global driver, temp_profile
     print("\n🔒 Закрытие...")
     if driver:
-        try: driver.quit()
-        except: pass
+        try: 
+            driver.quit()
+        except: 
+            pass
     if temp_profile and os.path.exists(temp_profile):
         try:
             import shutil
             shutil.rmtree(temp_profile, ignore_errors=True)
-        except: pass
+        except: 
+            pass
 
 def init_firefox():
     global driver, browser_name, firefox_driver
@@ -99,26 +109,20 @@ def init_firefox():
     print("🦊 Запуск Firefox DEFAULT...")
     try:
         firefox_options = FirefoxOptions()
-        
-        # КРИТИЧЕСКИЕ ОПЦИИ ДЛЯ DEFAULT PROFILE
         firefox_options.add_argument("--disable-web-security")
         firefox_options.add_argument("--no-sandbox")
         firefox_options.add_argument("--disable-gpu")
         firefox_options.add_argument("--disable-dev-shm-usage")
         
-        # ОТКЛЮЧАЕМ ВСЕ НАСТРОЙКИ WEBDRIVER ДЛЯ DEFAULT
         firefox_options.set_preference("dom.webdriver.enabled", False)
         firefox_options.set_preference("useAutomationExtension", False)
         firefox_options.set_preference("marionette.log.level", "FATAL")
         
-        # ИСПОЛЬЗУЕМ ТОЛЬКО DEFAULT-RELEASE
         profile_path = get_firefox_default_profile()
         firefox_options.add_argument(f"-profile")
         firefox_options.add_argument(profile_path)
-        
         print(f"📁 Профиль: {profile_path}")
         
-        # Geckodriver с логами
         firefox_service = FirefoxService()
         firefox_driver = webdriver.Firefox(service=firefox_service, options=firefox_options)
         driver = firefox_driver
@@ -154,63 +158,6 @@ def init_chromium():
         print(f"❌ Chromium ошибка: {e}")
         return False
 
-def clean_text(text):
-    if not text: return "Не найдено"
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(text, 'html.parser')
-    return re.sub(r'\s+', ' ', soup.get_text()).strip()[:80]
-
-def get_weather_data(driver):
-    if not safe_driver_check():
-        return {'temp': 'Сессия потеряна', 'desc': '', 'wind': '', 'humidity': ''}
-    
-    try:
-        page_text = driver.find_element(By.TAG_NAME, "body").text
-        temp_match = re.search(r'([+-]?\s?\d{1,2}[°°])', page_text[:1000])
-        temp = clean_text(temp_match.group(1)) if temp_match else "Не найдено"
-        
-        if temp != "Не найдено" and not re.match(r'^[+-]', temp):
-            temp = "+" + temp.strip()
-        
-        desc_patterns = ['облачно', 'дождь', 'ясно', 'пасмурно', 'снег', 'туман', 'морось', 'прояснения']
-        desc = "Не найдено"
-        page_lower = page_text.lower()
-        for pattern in desc_patterns:
-            if pattern in page_lower:
-                desc = pattern.capitalize()
-                break
-        
-        page_source = driver.page_source.lower()
-        wind_match = re.search(r'ветер[:\s]*.*?(\d+[,\.]\d+|\d+)\s*м/с', page_source)
-        wind = clean_text(wind_match.group(1)) + " м/с" if wind_match else 'Не указано'
-        
-        humidity_match = re.search(r'влажность[:\s]*?(\d+%)', page_source)
-        humidity = clean_text(humidity_match.group(1)) if humidity_match else 'Не указано'
-        
-    except Exception:
-        return {
-            'temp': 'Ошибка', 'desc': 'Ошибка', 
-            'wind': 'Не указано', 'humidity': 'Не указано'
-        }
-    
-    return {
-        'temp': temp,
-        'desc': desc,
-        'wind': wind,
-        'humidity': humidity
-    }
-
-
-def print_weather(weather_data):
-    print("\n" + "═"*70)
-    print(f"🌡️  QUICKTAB | {browser_name} | БЕЛОРЕЧЕНСК")
-    print("═"*70)
-    print(f"🌡️ Температура:  {weather_data['temp']}")
-    print(f"☁️  Условия:      {weather_data['desc']}")
-    print(f"💨 Ветер:        {weather_data['wind']}")
-    print(f"💧 Влажность:    {weather_data['humidity']}")
-    print("═"*70)
-
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
@@ -227,29 +174,62 @@ if not success:
 wait = WebDriverWait(driver, 10)
 
 try:
-    print(f"🌍 Загружаю погоду в {browser_name}...")
-    driver.get("https://yandex.ru/pogoda/ru/belorechensk")
-    time.sleep(3)
-
-    if safe_driver_check():
+    print(f"🌍 Загружаю данные в {browser_name}...")
+    
+    if safe_driver_check(driver):
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        weather = get_weather_data(driver)
-        print_weather(weather)
+        
+        tabs = {}  # Словарь вкладок: {index: module}
+        
+        # ОТКРЫВАЕМ ВСЕ модули в НОВЫХ вкладках
+        for i, module in enumerate(MODULES):
+            if i > 0:  # Первая вкладка уже открыта
+                driver.execute_script("window.open('');")
+                tab_handle = driver.window_handles[i]
+                driver.switch_to.window(tab_handle)
+            
+            if module == "weather":
+                driver.get("https://yandex.ru/pogoda/ru/belorechensk")
+                time.sleep(3)
+                data = get_weather_data(driver)
+                print_weather(data, browser_name)
+                tabs[i] = module
+            elif module == "currency":
+                driver.get("https://www.cbr.ru/currency_base/daily/")
+                time.sleep(3)
+                data = get_currency_data(driver)
+                print_currency(data, browser_name)
+                tabs[i] = module
         
         print("\n✅ QUICKTAB РАБОТАЕТ!")
-        print("📍 БЕЛОРЕЧЕНСК")
-        print("🛑 Ctrl+C для выхода")
-        if temp_profile: print(f"🔒 Временный профиль: {temp_profile}")
+        print("📍 Ctrl+C для выхода")
+        if temp_profile: 
+            print(f"🔒 Временный профиль: {temp_profile}")
+        print(f"🆕 Открыто вкладок: {len(tabs)}")
 
         cycle = 1
         while running:
-            if not safe_driver_check(): break
+            if not safe_driver_check(driver): 
+                break
             time.sleep(60)
-            if not running: break
             print(f"\n🔄 Обновление #{cycle}...")
-            if safe_refresh():
-                weather = get_weather_data(driver)
-                print_weather(weather)
+            
+            # ЦИКЛ по ВСЕМ вкладкам
+            for tab_index, module in tabs.items():
+                try:
+                    driver.switch_to.window(driver.window_handles[tab_index])
+                    
+                    if safe_refresh(driver):
+                        if module == "weather":
+                            data = get_weather_data(driver)
+                            print_weather(data, browser_name)
+                        elif module == "currency":
+                            data = get_currency_data(driver)
+                            print_currency(data, browser_name)
+                except:
+                    print(f"⚠️  Ошибка вкладки {tab_index}")
+                    continue
+                    
             cycle += 1
 
 except Exception as e:
@@ -258,3 +238,4 @@ except Exception as e:
 finally:
     cleanup()
     print("✅ Готово!")
+
