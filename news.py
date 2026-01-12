@@ -13,7 +13,6 @@ def safe_driver_check(driver):
     except: 
         return False
 
-# 🆕 НАДЕЖНЫЕ сайты (RIA + Habr)
 NEWS_SITES = {
     "cyber": {
         "url": "https://habr.com/ru/hubs/infosecurity/news/",  
@@ -52,14 +51,13 @@ def get_news_data(driver, topic="politics"):
     news_items = []
     
     print(f"🔍 ОТКРЫВАЮ: {site_config['url']}")
-    driver.get(site_config['url'])  # ✅ НОВОСТЬ САМА открывает сайт!
-    time.sleep(6)  # Ждем полной загрузки RIA
+    driver.get(site_config['url'])  
+    time.sleep(6)  
     
     print(f"📍 Загружено: {driver.current_url}")
     print(f"🔍 НАЧИНАЮ ПАРСИНГ {site_config['name']}")
     
     try:
-        # Простые селекторы RIA
         selectors = [
             ".list-item__title", "h3 a", "h2 a", 
             ".article-item__title", ".news-title a"
@@ -82,7 +80,6 @@ def get_news_data(driver, topic="politics"):
             if len(news_items) >= 3:
                 break
         
-        # Fallback
         if len(news_items) < 2:
             print("🔄 Fallback: любые ссылки...")
             links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
@@ -107,7 +104,6 @@ def get_news_data(driver, topic="politics"):
 
 
 def print_news(news_data, browser_name):
-    """🆕 Красивый вывод с ПОЛНЫМИ ссылками"""
     print("\n" + "═"*90)
     print(f"📰  QUICKTAB | {browser_name} | {news_data['topic']}")
     print("═"*90)
@@ -118,9 +114,7 @@ def print_news(news_data, browser_name):
         for i, (title, url) in enumerate(news_data['news_items'], 1):
             marker = "🔗" if url and url.startswith('http') else "📄"
             
-            # ✅ ПОЛНАЯ ссылка (не slug)
             if url and url.startswith('http'):
-                # Укорачиваем для красоты
                 url_display = url.replace('https://ria.ru/', 'ria.ru/') 
                 if len(url_display) > 60:
                     url_display = url_display[:57] + "..."
