@@ -296,7 +296,7 @@ QuickTab/
 
 ## Лицензия и автор
 
-**Автор:** Yaroslav Belov (Belorechensk, Краснодарский край, RU)  
+**Автор:** Yaroslav Belov  
 **Лицензия:** MIT  
 **Год:** 2026
 
