@@ -133,7 +133,7 @@ class AboutPage(BasePage):
         
         update_btn = ctk.CTkButton(
             button_frame,
-            text="🔄 Версия 0.6.0 (актуальная)",
+            text="🔄 Версия 0.7.0 (актуальная)",
             command=self.check_updates,
             fg_color="#00AAFF",
             hover_color="#0088CC",
