@@ -31,7 +31,7 @@ class AboutPage(BasePage):
         try:
             from quicktab import __version__
         except ImportError:
-            __version__ = "0.5.0"
+            __version__ = "0.6.0"
         
         version_label = ctk.CTkLabel(
             container,
@@ -111,6 +111,6 @@ class AboutPage(BasePage):
         msgbox.showinfo(
             "Обновления",
             "У вас установлена последняя версия!\n\n"
-            "Текущая версия: 0.5.0\n"
-            "Последняя версия: 0.5.0"
+            "Текущая версия: 0.6.0\n"
+            "Последняя версия: 0.6.0"
         )

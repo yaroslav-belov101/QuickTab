@@ -9,11 +9,13 @@ import time
 
 
 class SearchPage(BasePage):
-    """Страница поиска с парсингом результатов"""
+    """Страница поиска с краткой сводкой и ссылками"""
     
     def __init__(self, parent, controller):
         self.search_history = []
         self.current_results = []
+        self.quick_answer = None
+        self.web_links = []
         super().__init__(parent, controller)
     
     def create_widgets(self):
@@ -21,7 +23,7 @@ class SearchPage(BasePage):
         title = ctk.CTkLabel(
             self,
             text="ПОИСК",
-            font=("Arial", 32, "bold"),
+            font=("Arial", 48, "bold"),
             text_color="#00FFFF"
         )
         title.pack(pady=(20, 15))
@@ -30,8 +32,8 @@ class SearchPage(BasePage):
         self.search_entry = ctk.CTkEntry(
             self,
             placeholder_text="Введите запрос...",
-            font=("Arial", 20),
-            height=45,
+            font=("Arial", 30),
+            height=68,
             fg_color="#3a3a3a",
             border_color="#555555",
             border_width=2
@@ -46,8 +48,8 @@ class SearchPage(BasePage):
             command=self.perform_search,
             fg_color="#00AAFF",
             hover_color="#0088DD",
-            height=45,
-            font=("Arial", 18, "bold"),
+            height=68,
+            font=("Arial", 27, "bold"),
             corner_radius=10
         )
         search_btn.pack(pady=5, padx=30, fill="x")
@@ -66,6 +68,8 @@ class SearchPage(BasePage):
     def show_start_screen(self):
         """Показать стартовый экран с историей"""
         self._clear_content()
+        self.quick_answer = None
+        self.web_links = []
         
         if self.search_history:
             history_frame = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=15)
@@ -77,19 +81,19 @@ class SearchPage(BasePage):
             ctk.CTkLabel(
                 header,
                 text="📋 История поиска",
-                font=("Arial", 20, "bold"),
+                font=("Arial", 30, "bold"),
                 text_color="#FFFFFF"
             ).pack(side="left")
             
             clear_btn = ctk.CTkButton(
                 header,
                 text="Очистить",
-                font=("Arial", 12),
+                font=("Arial", 18),
                 fg_color="transparent",
                 hover_color="#FF5252",
                 text_color="#888888",
-                width=80,
-                height=25,
+                width=120,
+                height=38,
                 command=self.clear_history
             )
             clear_btn.pack(side="right")
@@ -99,12 +103,12 @@ class SearchPage(BasePage):
                 btn = ctk.CTkButton(
                     history_frame,
                     text=f"• {item['query']} ({time_str})",
-                    font=("Arial", 16),
+                    font=("Arial", 24),
                     fg_color="transparent",
                     hover_color="#3a3a3a",
                     text_color="#AAAAAA",
                     anchor="w",
-                    height=35,
+                    height=52,
                     command=lambda q=item['query']: self.set_query(q)
                 )
                 btn.pack(fill="x", padx=15, pady=2)
@@ -116,7 +120,7 @@ class SearchPage(BasePage):
             ctk.CTkLabel(
                 welcome,
                 text="🔍 Добро пожаловать в поиск",
-                font=("Arial", 22, "bold"),
+                font=("Arial", 33, "bold"),
                 text_color="#00AAFF"
             ).pack(pady=(20, 10))
             
@@ -127,9 +131,8 @@ class SearchPage(BasePage):
                      "• Курс доллара, евро, bitcoin\n"
                      "• Погода в [город]\n"
                      "• Новости [тема]\n"
-                     "• Что такое Python, Wikipedia\n"
-                     "• Любой вопрос — поиск в интернете",
-                font=("Arial", 16),
+                     "• Ответы на вопросы",
+                font=("Arial", 24),
                 text_color="#CCCCCC",
                 justify="left"
             ).pack(pady=10, padx=20)
@@ -206,15 +209,15 @@ class SearchPage(BasePage):
         self.loading_label = ctk.CTkLabel(
             loading_frame,
             text="🔍 Ищем...",
-            font=("Arial", 24),
+            font=("Arial", 36),
             text_color="#00AAFF"
         )
         self.loading_label.pack(pady=20)
         
         self.loading_status = ctk.CTkLabel(
             loading_frame,
-            text="Подключение к источникам...",
-            font=("Arial", 14),
+            text="Формируем краткую сводку...",
+            font=("Arial", 21),
             text_color="#888888"
         )
         self.loading_status.pack()
@@ -238,7 +241,7 @@ class SearchPage(BasePage):
         ctk.CTkLabel(
             error_frame,
             text=f"⚠️ {message}",
-            font=("Arial", 18),
+            font=("Arial", 27),
             text_color="#FF5252"
         ).pack(pady=20)
         
@@ -287,63 +290,367 @@ class SearchPage(BasePage):
         return None
     
     def _do_search(self, query: str):
-        """Фактический поиск с приоритетами"""
-        results = []
+        """Фактический поиск: сначала сводка, потом ссылки"""
         query_lower = query.lower()
         
         print(f"[Search] Начало поиска: '{query}'")
         
-        # УРОВЕНЬ 1: Быстрые ответы (локальные данные)
+        # === ЭТАП 1: Формируем краткую сводку ===
+        self.update_loading_status("Формируем краткую сводку...")
         
-        # 1. Поиск валют
-        self.update_loading_status("Проверка курсов валют...")
-        currency_result = self._search_currency(query_lower, query)
-        if currency_result:
-            print(f"[Search] Найдена валюта: {currency_result['title']}")
-            results.append(currency_result)
+        quick_answer = self._get_quick_answer(query, query_lower)
         
-        # 2. Поиск погоды
-        self.update_loading_status("Проверка погоды...")
-        weather_result = self._search_weather(query_lower, query)
-        if weather_result:
-            print(f"[Search] Найдена погода: {weather_result['title']}")
-            results.append(weather_result)
+        # === ЭТАП 2: Ищем ссылки в интернете ===
+        self.update_loading_status("Ищем ссылки в интернете...")
         
-        # 3. Поиск новостей
-        self.update_loading_status("Поиск в новостях...")
-        news_result = self._search_news(query_lower, query)
-        if news_result:
-            print(f"[Search] Найдены новости: {news_result['title']}")
-            results.append(news_result)
+        web_links = self._get_web_links(query)
         
-        # УРОВЕНЬ 2: Парсинг конкретных сайтов (Wikipedia, etc.)
-        if not results or self._is_knowledge_query(query_lower):
-            self.update_loading_status("Поиск в базах знаний...")
-            wiki_result = self._search_wikipedia(query)
-            if wiki_result:
-                results.append(wiki_result)
+        # === ЭТАП 3: Показываем результаты ===
+        self.quick_answer = quick_answer
+        self.web_links = web_links
         
-        # УРОВЕНЬ 3: Поисковая выдача DuckDuckGo
-        if not results:
-            self.update_loading_status("Поиск в интернете...")
-            web_results = self._search_web(query)
-            if web_results:
-                results.extend(web_results)
+        self.after(0, lambda: self._display_results(query, quick_answer, web_links))
+    
+    def _get_quick_answer(self, query: str, query_lower: str) -> Optional[Dict]:
+        """Получить краткую сводку из всех источников"""
         
-        print(f"[Search] Всего результатов: {len(results)}")
+        # 1. Валюты
+        if any(kw in query_lower for kw in ["курс", "цена", "стоимость", "доллар", "евро", "биткоин", "usd", "eur", "btc"]):
+            result = self._search_currency(query_lower, query)
+            if result:
+                return result
         
-        # Если совсем ничего не нашли
-        if not results:
-            results.append({
-                "type": "web",
-                "title": "🔍 Нет результатов",
-                "content": f"По запросу '{query}' ничего не найдено.\nПопробуйте изменить запрос.",
+        # 2. Погода
+        if any(kw in query_lower for kw in ["погода", "температура", "градус"]):
+            result = self._search_weather(query_lower, query)
+            if result:
+                return result
+        
+        # 3. Новости
+        if any(kw in query_lower for kw in ["новост", "событ"]):
+            result = self._search_news(query_lower, query)
+            if result:
+                return result
+        
+        # 4. Wikipedia для знаний
+        if self._is_knowledge_query(query_lower):
+            result = self._search_wikipedia(query)
+            if result:
+                return result
+        
+        # 5. Калькулятор
+        math_result = self._calculate_math(query)
+        if math_result:
+            return math_result
+        
+        return None
+    
+    def _get_web_links(self, query: str) -> List[Dict]:
+        """Получить ссылки из веб-поиска"""
+        links = []
+        
+        # Пробуем DuckDuckGo
+        ddg_results = self._search_duckduckgo(query)
+        if ddg_results:
+            links.extend(ddg_results)
+        
+        # Если мало результатов, добавляем прямые ссылки на поисковики
+        if len(links) < 3:
+            links.append({
+                "type": "search_engine",
+                "title": "🔍 DuckDuckGo",
+                "content": "Поискать в DuckDuckGo",
                 "url": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
-                "action": "Открыть в браузере"
+                "action": "Открыть"
+            })
+            links.append({
+                "type": "search_engine", 
+                "title": "🌐 Google",
+                "content": "Поискать в Google",
+                "url": f"https://google.com/search?q={query.replace(' ', '+')}",
+                "action": "Открыть"
             })
         
-        self.current_results = results
-        self.after(0, lambda: self.show_results(query, results))
+        return links[:8]
+    
+    def _display_results(self, query: str, quick_answer: Optional[Dict], web_links: List[Dict]):
+        """Отобразить результаты: сводка сверху, ссылки снизу"""
+        self._clear_content()
+        
+        # Кнопка "Назад" и заголовок
+        top_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        top_frame.pack(fill="x", pady=(0, 10))
+        
+        back_btn = ctk.CTkButton(
+            top_frame,
+            text="← Новый поиск",
+            command=self.show_start_screen,
+            fg_color="transparent",
+            hover_color="#3a3a3a",
+            text_color="#888888",
+            anchor="w",
+            height=52,
+            font=("Arial", 24)
+        )
+        back_btn.pack(side="left")
+        
+        ctk.CTkLabel(
+            top_frame,
+            text=f"'{query}'",
+            font=("Arial", 24),
+            text_color="#888888"
+        ).pack(side="right")
+        
+        # === КРАТКАЯ СВОДКА ===
+        if quick_answer:
+            self._create_quick_answer_card(quick_answer)
+        else:
+            no_answer = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=15)
+            no_answer.pack(pady=10, fill="x")
+            
+            ctk.CTkLabel(
+                no_answer,
+                text="💡 Краткая сводка",
+                font=("Arial", 27, "bold"),
+                text_color="#888888"
+            ).pack(pady=(20, 10), anchor="w", padx=20)
+            
+            ctk.CTkLabel(
+                no_answer,
+                text="Нет данных в приложении. Используйте ссылки ниже для поиска в интернете.",
+                font=("Arial", 24),
+                text_color="#AAAAAA",
+                wraplength=700
+            ).pack(pady=10, anchor="w", padx=20)
+        
+        # === РАЗДЕЛИТЕЛЬ ===
+        if web_links:
+            separator = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+            separator.pack(pady=15, fill="x")
+            
+            ctk.CTkLabel(
+                separator,
+                text="🔗 ССЫЛКИ",
+                font=("Arial", 24, "bold"),
+                text_color="#555555"
+            ).pack(side="left")
+            
+            line = ctk.CTkFrame(separator, fg_color="#444444", height=2)
+            line.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        
+        # === ССЫЛКИ ===
+        for link in web_links:
+            self._create_link_card(link)
+    
+    def _create_quick_answer_card(self, answer: Dict):
+        """Создать карточку краткой сводки"""
+        colors = {
+            "currency": "#00C853",
+            "converter": "#00C853",
+            "weather": "#2979FF",
+            "news": "#FF9100",
+            "wiki": "#9C27B0",
+            "math": "#FF5722"
+        }
+        color = colors.get(answer["type"], "#00AAFF")
+        
+        icons = {
+            "currency": "💱",
+            "converter": "💱",
+            "weather": "🌤️",
+            "news": "📰",
+            "wiki": "📚",
+            "math": "🧮"
+        }
+        icon = icons.get(answer["type"], "💡")
+        
+        # Карточка сводки
+        card = ctk.CTkFrame(
+            self.content_frame, 
+            fg_color=color,
+            corner_radius=20,
+            border_width=0
+        )
+        card.pack(pady=10, fill="x")
+        
+        # Внутренняя рамка
+        inner = ctk.CTkFrame(card, fg_color="#1a1a1a", corner_radius=18)
+        inner.pack(padx=3, pady=3, fill="both", expand=True)
+        
+        # Заголовок
+        title_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        title_frame.pack(pady=(20, 10), fill="x", padx=20)
+        
+        ctk.CTkLabel(
+            title_frame,
+            text=f"{icon} {answer['title']}",
+            font=("Arial", 33, "bold"),
+            text_color=color
+        ).pack(side="left")
+        
+        ctk.CTkLabel(
+            title_frame,
+            text="КРАТКАЯ СВОДКА",
+            font=("Arial", 18),
+            text_color="#666666",
+            fg_color="#2a2a2a",
+            corner_radius=10
+        ).pack(side="right", padx=(10, 0))
+        
+        # Содержимое
+        content = ctk.CTkLabel(
+            inner,
+            text=answer["content"],
+            font=("Arial", 27),
+            text_color="#FFFFFF",
+            wraplength=680,
+            justify="left"
+        )
+        content.pack(pady=15, anchor="w", padx=20)
+        
+        # Кнопки
+        if answer.get("action"):
+            btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
+            btn_frame.pack(pady=(0, 20), anchor="w", padx=20)
+            
+            action_btn = ctk.CTkButton(
+                btn_frame,
+                text=answer["action"],
+                font=("Arial", 24, "bold"),
+                fg_color=color,
+                hover_color="#FFFFFF",
+                text_color="#000000",
+                height=68,
+                width=270,
+                corner_radius=10,
+                command=lambda a=answer: self._handle_quick_answer(a)
+            )
+            action_btn.pack(side="left")
+            
+            if answer.get("url"):
+                copy_btn = ctk.CTkButton(
+                    btn_frame,
+                    text="🔗 Копировать ссылку",
+                    font=("Arial", 21),
+                    fg_color="transparent",
+                    hover_color="#3a3a3a",
+                    text_color="#888888",
+                    height=68,
+                    command=lambda u=answer["url"]: self._copy_to_clipboard(u)
+                )
+                copy_btn.pack(side="left", padx=(10, 0))
+    
+    def _create_link_card(self, link: Dict):
+        """Создать карточку ссылки"""
+        colors = {
+            "web": "#888888",
+            "search_engine": "#00AAFF",
+            "wiki": "#9C27B0"
+        }
+        color = colors.get(link["type"], "#888888")
+        
+        card = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=12)
+        card.pack(pady=5, fill="x")
+        
+        # Заголовок
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.pack(pady=(12, 5), fill="x", padx=15)
+        
+        ctk.CTkLabel(
+            header,
+            text=link["title"],
+            font=("Arial", 24, "bold"),
+            text_color=color
+        ).pack(side="left")
+        
+        # Домен
+        if link.get("url"):
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(link["url"]).netloc.replace("www.", "")
+                if domain:
+                    ctk.CTkLabel(
+                        header,
+                        text=f"({domain})",
+                        font=("Arial", 18),
+                        text_color="#666666"
+                    ).pack(side="left", padx=(8, 0))
+            except:
+                pass
+        
+        # Сниппет
+        if link.get("content"):
+            ctk.CTkLabel(
+                card,
+                text=link["content"],
+                font=("Arial", 21),
+                text_color="#AAAAAA",
+                wraplength=680,
+                justify="left"
+            ).pack(pady=5, anchor="w", padx=15)
+        
+        # Кнопки
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack(pady=(5, 12), anchor="w", padx=15)
+        
+        action_btn = ctk.CTkButton(
+            btn_frame,
+            text=link.get("action", "Открыть"),
+            font=("Arial", 20),
+            fg_color="#3a3a3a",
+            hover_color=color,
+            text_color="#FFFFFF",
+            height=48,
+            width=150,
+            corner_radius=6,
+            command=lambda l=link: self._open_link(l)
+        )
+        action_btn.pack(side="left")
+        
+        if link.get("url"):
+            copy_btn = ctk.CTkButton(
+                btn_frame,
+                text="Копировать",
+                font=("Arial", 20),
+                fg_color="transparent",
+                hover_color="#3a3a3a",
+                text_color="#666666",
+                height=48,
+                width=150,
+                command=lambda u=link["url"]: self._copy_to_clipboard(u)
+            )
+            copy_btn.pack(side="left", padx=(8, 0))
+    
+    def _handle_quick_answer(self, answer: Dict):
+        """Обработать действие краткой сводки"""
+        rtype = answer.get("type")
+        
+        if rtype in ["currency", "converter", "weather", "news"]:
+            self.controller.show_frame("HomePage")
+        elif answer.get("url"):
+            webbrowser.open(answer["url"])
+    
+    def _open_link(self, link: Dict):
+        """Открыть ссылку"""
+        if link.get("url"):
+            webbrowser.open(link["url"])
+    
+    def _copy_to_clipboard(self, text: str):
+        """Копировать в буфер обмена"""
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+        
+        notif = ctk.CTkLabel(
+            self,
+            text="✓ Скопировано!",
+            font=("Arial", 21),
+            text_color="#00FF00",
+            fg_color="#2a2a2a",
+            corner_radius=10
+        )
+        notif.place(relx=0.5, rely=0.9, anchor="center")
+        self.after(1500, notif.destroy)
     
     def _is_knowledge_query(self, query_lower: str) -> bool:
         """Определить, является ли запрос запросом знаний"""
@@ -359,6 +666,27 @@ class SearchPage(BasePage):
             r'wikipedia',
         ]
         return any(re.search(p, query_lower) for p in knowledge_patterns)
+    
+    def _calculate_math(self, query: str) -> Optional[Dict]:
+        """Вычислить математическое выражение"""
+        try:
+            clean = re.sub(r'[^0-9+\-*/().\s]', '', query)
+            if not clean or len(clean) < 3:
+                return None
+            
+            if not any(op in clean for op in ['+', '-', '*', '/']):
+                return None
+            
+            result = eval(clean)
+            
+            return {
+                "type": "math",
+                "title": "Калькулятор",
+                "content": f"{clean.strip()} = {result}",
+                "action": "Вычислить ещё"
+            }
+        except:
+            return None
     
     def _search_currency(self, query_lower: str, original: str) -> Optional[Dict]:
         """Поиск валют"""
@@ -389,7 +717,7 @@ class SearchPage(BasePage):
         if found_rates:
             return {
                 "type": "currency",
-                "title": "💱 Курс валют",
+                "title": "Курс валют",
                 "content": "\n".join(found_rates),
                 "data": currency_data,
                 "action": "Обновить курсы"
@@ -404,7 +732,7 @@ class SearchPage(BasePage):
             if all_rates:
                 return {
                     "type": "currency",
-                    "title": "💱 Курсы валют",
+                    "title": "Курсы валют",
                     "content": "\n".join(all_rates),
                     "data": currency_data,
                     "action": "Обновить курсы"
@@ -487,7 +815,7 @@ class SearchPage(BasePage):
             
             return {
                 "type": "converter",
-                "title": "💱 Конвертер валют",
+                "title": "Конвертер валют",
                 "content": f"{amount:,.2f} {from_curr} = {result:,.2f} {to_curr}\n\n"
                           f"Курс: 1 {from_curr} = {rates[from_curr]/rates[to_curr]:,.2f} {to_curr}",
                 "action": "Точные курсы"
@@ -521,7 +849,7 @@ class SearchPage(BasePage):
         if weather_data:
             return {
                 "type": "weather",
-                "title": f"🌤️ Погода в {weather_data.get('city', city)}",
+                "title": f"Погода в {weather_data.get('city', city)}",
                 "content": f"{weather_data.get('temp', '--')}, {weather_data.get('desc', 'Нет данных')}\n"
                           f"💨 Ветер: {weather_data.get('wind', '--')}\n"
                           f"💧 Влажность: {weather_data.get('humidity', '--')}",
@@ -597,7 +925,7 @@ class SearchPage(BasePage):
                 preview = "\n".join([f"• {n['title'][:50]}..." for n in matching[:5]])
                 return {
                     "type": "news",
-                    "title": f"📰 Найдено в новостях ({len(matching)})",
+                    "title": f"Найдено в новостях ({len(matching)})",
                     "content": preview,
                     "action": "Открыть новости"
                 }
@@ -607,86 +935,68 @@ class SearchPage(BasePage):
             return None
     
     def _search_wikipedia(self, query: str) -> Optional[Dict]:
-        """Поиск в Wikipedia через парсинг"""
+        """Поиск в Wikipedia"""
         driver = self._get_driver()
         if not driver:
             return None
         
         try:
-            # Формируем URL поиска Wikipedia
-            search_term = query.replace(' ', '_')
+            # Формируем поисковый URL
+            search_term = query.replace(' ', '+')
             if 'что такое' in query.lower():
-                search_term = query.lower().replace('что такое', '').strip().replace(' ', '_')
+                search_term = query.lower().replace('что такое', '').strip().replace(' ', '+')
             
-            url = f"https://ru.wikipedia.org/wiki/{search_term}"
-            
-            self.update_loading_status(f"Загрузка Wikipedia...")
+            # Используем поиск Wikipedia
+            url = f"https://ru.wikipedia.org/w/index.php?search={search_term}&title=Служебная:Поиск&profile=default&fulltext=1"
             
             driver.get(url)
-            time.sleep(2)
+            time.sleep(3)
             
-            # Проверяем, есть ли статья
             from selenium.webdriver.common.by import By
             
-            # Ищем заголовок статьи
+            # Проверяем, есть ли результаты поиска
+            results = driver.find_elements(By.CSS_SELECTOR, "div.mw-search-result-heading a")
+            
+            if results:
+                # Берем первый результат
+                first_link = results[0].get_attribute('href')
+                driver.get(first_link)
+                time.sleep(2)
+            
+            # Получаем заголовок
             try:
                 title_elem = driver.find_element(By.CSS_SELECTOR, "h1.firstHeading")
                 title = title_elem.text.strip()
             except:
                 title = query
             
-            # Ищем первый параграф
+            # Получаем содержимое
             try:
-                # Пробуем найти основное содержимое
-                content = driver.find_element(By.CSS_SELECTOR, "div.mw-parser-output > p:not(.mw-empty-elt)")
-                snippet = content.text.strip()[:300]
-                if len(snippet) > 290:
-                    snippet += "..."
-            except:
-                # Fallback: ищем любой параграф
-                try:
-                    paragraphs = driver.find_elements(By.CSS_SELECTOR, "p")
-                    for p in paragraphs:
-                        text = p.text.strip()
-                        if len(text) > 50:
-                            snippet = text[:300]
-                            if len(snippet) > 290:
-                                snippet += "..."
-                            break
-                    else:
-                        return None
-                except:
-                    return None
-            
-            # Проверяем, что это не страница "Статья не найдена"
-            if "не существует" in snippet.lower() or "запросу не соответствует" in snippet.lower():
-                # Пробуем поиск
-                search_url = f"https://ru.wikipedia.org/w/index.php?search={query.replace(' ', '+')}"
-                driver.get(search_url)
-                time.sleep(2)
-                
-                # Ищем результаты поиска
-                try:
-                    results = driver.find_elements(By.CSS_SELECTOR, "div.mw-search-result-heading a")
-                    if results:
-                        first_link = results[0].get_attribute('href')
-                        driver.get(first_link)
-                        time.sleep(2)
-                        
-                        # Получаем данные с найденной страницы
-                        title = driver.find_element(By.CSS_SELECTOR, "h1.firstHeading").text.strip()
-                        content = driver.find_element(By.CSS_SELECTOR, "div.mw-parser-output > p:not(.mw-empty-elt)")
-                        snippet = content.text.strip()[:300]
-                        if len(snippet) > 290:
+                # Ищем первый значимый параграф
+                paragraphs = driver.find_elements(By.CSS_SELECTOR, "div.mw-parser-output > p")
+                snippet = ""
+                for p in paragraphs:
+                    text = p.text.strip()
+                    # Пропускаем пустые и короткие
+                    if len(text) > 100 and not text.startswith("("):
+                        snippet = text[:500]
+                        if len(snippet) > 490:
                             snippet += "..."
-                    else:
-                        return None
-                except:
+                        break
+                
+                if not snippet:
                     return None
+                    
+            except:
+                return None
+            
+            # Проверяем, что это не страница ошибки
+            if "не существует" in title.lower() or "ошибка" in title.lower():
+                return None
             
             return {
                 "type": "wiki",
-                "title": f"📚 {title}",
+                "title": title,
                 "content": snippet,
                 "url": driver.current_url,
                 "action": "Открыть статью"
@@ -696,8 +1006,8 @@ class SearchPage(BasePage):
             print(f"[Search] Ошибка Wikipedia: {e}")
             return None
     
-    def _search_web(self, query: str) -> List[Dict]:
-        """Поиск в DuckDuckGo через Selenium"""
+    def _search_duckduckgo(self, query: str) -> List[Dict]:
+        """Поиск в DuckDuckGo"""
         driver = self._get_driver()
         if not driver:
             return []
@@ -705,10 +1015,8 @@ class SearchPage(BasePage):
         results = []
         
         try:
-            # Используем DuckDuckGo HTML-версию (без JS)
+            # Используем HTML-версию DuckDuckGo (без JS)
             search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-            
-            self.update_loading_status("Загрузка результатов...")
             
             driver.get(search_url)
             time.sleep(3)
@@ -718,14 +1026,18 @@ class SearchPage(BasePage):
             # Ищем результаты
             result_elements = driver.find_elements(By.CSS_SELECTOR, "div.result")
             
-            for i, elem in enumerate(result_elements[:5]):  # Первые 5 результатов
+            for elem in result_elements[:5]:
                 try:
                     # Заголовок и ссылка
                     link_elem = elem.find_element(By.CSS_SELECTOR, "a.result__a")
                     title = link_elem.text.strip()
                     url = link_elem.get_attribute('href')
                     
-                    # Сниппет (описание)
+                    # Пропускаем рекламу и пустые
+                    if not title or "реклама" in title.lower():
+                        continue
+                    
+                    # Описание
                     try:
                         snippet_elem = elem.find_element(By.CSS_SELECTOR, "a.result__snippet")
                         snippet = snippet_elem.text.strip()[:200]
@@ -743,41 +1055,82 @@ class SearchPage(BasePage):
                     })
                     
                 except Exception as e:
-                    print(f"[Search] Ошибка парсинга результата {i}: {e}")
+                    print(f"[Search] Ошибка парсинга результата: {e}")
                     continue
             
-            # Если не нашли через HTML-версию, пробуем обычную
-            if not results:
-                self.update_loading_status("Пробуем альтернативный метод...")
+            # Если мало результатов, пробуем обычную версию
+            if len(results) < 2:
+                print("[Search] Мало результатов, пробуем основной DDG...")
                 
                 search_url = f"https://duckduckgo.com/?q={query.replace(' ', '+')}"
                 driver.get(search_url)
                 time.sleep(4)
                 
-                # Ищем в обычной версии
                 try:
-                    # Ждем загрузки результатов
+                    # Ждем загрузки
                     from selenium.webdriver.support.ui import WebDriverWait
                     from selenium.webdriver.support import expected_conditions as EC
                     
                     wait = WebDriverWait(driver, 10)
-                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='result']")))
                     
-                    result_elements = driver.find_elements(By.CSS_SELECTOR, "[data-testid='result']")
+                    # Пробуем разные селекторы
+                    selectors = [
+                        "[data-testid='result']",
+                        ".result",
+                        "article",
+                    ]
+                    
+                    result_elements = []
+                    for selector in selectors:
+                        try:
+                            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                            result_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            if result_elements:
+                                break
+                        except:
+                            continue
                     
                     for elem in result_elements[:5]:
                         try:
-                            title_elem = elem.find_element(By.CSS_SELECTOR, "[data-testid='result-title-a']")
-                            title = title_elem.text.strip()
-                            url = title_elem.get_attribute('href')
+                            # Пробуем разные селекторы для заголовка
+                            title_selectors = [
+                                "[data-testid='result-title-a']",
+                                "h2 a",
+                                "a[href]"
+                            ]
                             
-                            try:
-                                snippet_elem = elem.find_element(By.CSS_SELECTOR, "[data-testid='result-snippet']")
-                                snippet = snippet_elem.text.strip()[:200]
-                                if len(snippet) > 190:
-                                    snippet += "..."
-                            except:
-                                snippet = "Нет описания"
+                            title = url = ""
+                            for sel in title_selectors:
+                                try:
+                                    title_elem = elem.find_element(By.CSS_SELECTOR, sel)
+                                    title = title_elem.text.strip()
+                                    url = title_elem.get_attribute('href')
+                                    if title and url:
+                                        break
+                                except:
+                                    continue
+                            
+                            if not title or not url:
+                                continue
+                            
+                            # Описание
+                            snippet = "Нет описания"
+                            snippet_selectors = [
+                                "[data-testid='result-snippet']",
+                                ".result__snippet",
+                                "p"
+                            ]
+                            
+                            for sel in snippet_selectors:
+                                try:
+                                    snippet_elem = elem.find_element(By.CSS_SELECTOR, sel)
+                                    snippet = snippet_elem.text.strip()[:200]
+                                    if len(snippet) > 190:
+                                        snippet += "..."
+                                    if len(snippet) > 20:
+                                        break
+                                except:
+                                    continue
                             
                             results.append({
                                 "type": "web",
@@ -786,160 +1139,16 @@ class SearchPage(BasePage):
                                 "url": url,
                                 "action": "Открыть"
                             })
-                        except:
+                            
+                        except Exception as e:
+                            print(f"[Search] Ошибка парсинга: {e}")
                             continue
                             
                 except Exception as e:
-                    print(f"[Search] Ошибка обычной версии DDG: {e}")
+                    print(f"[Search] Ошибка основного DDG: {e}")
         
         except Exception as e:
             print(f"[Search] Ошибка веб-поиска: {e}")
         
+        print(f"[Search] Найдено {len(results)} веб-результатов")
         return results
-    
-    def show_results(self, query: str, results: List[Dict]):
-        """Показать результаты поиска"""
-        self._clear_content()
-        
-        # Кнопка "Назад"
-        back_btn = ctk.CTkButton(
-            self.content_frame,
-            text="← Новый поиск",
-            command=self.show_start_screen,
-            fg_color="transparent",
-            hover_color="#3a3a3a",
-            text_color="#888888",
-            anchor="w",
-            height=35,
-            font=("Arial", 16)
-        )
-        back_btn.pack(fill="x", pady=(0, 10))
-        
-        # Запрос
-        header = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        header.pack(fill="x", pady=5)
-        
-        ctk.CTkLabel(
-            header,
-            text="Результаты поиска",
-            font=("Arial", 20, "bold"),
-            text_color="#FFFFFF"
-        ).pack(side="left")
-        
-        ctk.CTkLabel(
-            header,
-            text=f"'{query}'",
-            font=("Arial", 16),
-            text_color="#888888"
-        ).pack(side="left", padx=(10, 0))
-        
-        # Результаты
-        for result in results:
-            self._create_result_card(result)
-    
-    def _create_result_card(self, result: Dict):
-        """Создать карточку результата"""
-        colors = {
-            "currency": "#00C853",
-            "converter": "#00C853",
-            "weather": "#2979FF",
-            "news": "#FF9100",
-            "wiki": "#9C27B0",
-            "web": "#888888"
-        }
-        color = colors.get(result["type"], "#00AAFF")
-        
-        card = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=15)
-        card.pack(pady=10, fill="x")
-        
-        # Иконка по типу
-        icons = {
-            "currency": "💱",
-            "converter": "💱",
-            "weather": "🌤️",
-            "news": "📰",
-            "wiki": "📚",
-            "web": "🌐"
-        }
-        icon = icons.get(result["type"], "🔍")
-        
-        # Заголовок с иконкой
-        title_frame = ctk.CTkFrame(card, fg_color="transparent")
-        title_frame.pack(pady=(15, 5), fill="x", padx=15)
-        
-        ctk.CTkLabel(
-            title_frame,
-            text=f"{icon} {result['title']}",
-            font=("Arial", 18, "bold"),
-            text_color=color
-        ).pack(side="left")
-        
-        # Содержимое
-        ctk.CTkLabel(
-            card,
-            text=result["content"],
-            font=("Arial", 15),
-            text_color="#CCCCCC",
-            wraplength=700,
-            justify="left"
-        ).pack(pady=10, anchor="w", padx=15)
-        
-        # Кнопки действий
-        if result.get("action") or result.get("url"):
-            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-            btn_frame.pack(pady=(0, 15), anchor="w", padx=15)
-            
-            if result.get("action"):
-                action_btn = ctk.CTkButton(
-                    btn_frame,
-                    text=result["action"],
-                    font=("Arial", 14),
-                    fg_color="#3a3a3a",
-                    hover_color=color,
-                    text_color="#FFFFFF",
-                    height=35,
-                    width=140,
-                    corner_radius=8,
-                    command=lambda r=result: self._handle_action(r)
-                )
-                action_btn.pack(side="left", padx=(0, 10))
-            
-            if result.get("url"):
-                copy_btn = ctk.CTkButton(
-                    btn_frame,
-                    text="Копировать ссылку",
-                    font=("Arial", 14),
-                    fg_color="transparent",
-                    hover_color="#3a3a3a",
-                    text_color="#888888",
-                    height=35,
-                    width=140,
-                    command=lambda u=result["url"]: self._copy_to_clipboard(u)
-                )
-                copy_btn.pack(side="left")
-    
-    def _handle_action(self, result: Dict):
-        """Обработать действие карточки"""
-        rtype = result.get("type")
-        
-        if rtype in ["currency", "converter", "weather", "news"]:
-            self.controller.show_frame("HomePage")
-        elif result.get("url"):
-            webbrowser.open(result["url"])
-    
-    def _copy_to_clipboard(self, text: str):
-        """Копировать в буфер обмена"""
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        self.update()
-        
-        notif = ctk.CTkLabel(
-            self,
-            text="✓ Скопировано!",
-            font=("Arial", 14),
-            text_color="#00FF00",
-            fg_color="#2a2a2a",
-            corner_radius=10
-        )
-        notif.place(relx=0.5, rely=0.9, anchor="center")
-        self.after(1500, notif.destroy)
