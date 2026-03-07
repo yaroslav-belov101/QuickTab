@@ -57,6 +57,7 @@ class HomePage(BasePage):
         self.request_count = 0
         self.current_news_topic = "cyber"
         self.is_loading = False
+        self._driver_lock = threading.Lock()  # Блокировка для драйвера
         
         super().__init__(parent, controller)
         
@@ -73,6 +74,7 @@ class HomePage(BasePage):
         self._create_weather_widget()
         self._create_currency_cards()
         self._create_news_feed()
+        self._create_favorites_section()
         self._create_history_section()
         self._create_fab_button()
     
@@ -199,7 +201,7 @@ class HomePage(BasePage):
                         text_color=color).pack(side="left", padx=(15, 0))
             
             rate_label = ctk.CTkLabel(
-                card, text="Загрузка...", font=("Courier", 36, "bold"), text_color="white"
+                card, text="--", font=("Courier", 36, "bold"), text_color="white"
             )
             rate_label.pack(pady=15)
             
@@ -211,7 +213,7 @@ class HomePage(BasePage):
             self.currency_cards[code] = {"rate": rate_label, "change": change_label}
     
     def _create_news_feed(self):
-        """Лента новостей"""
+        """Лента новостей УМЕНЬШЕННАЯ в 1.5 раза"""
         news_container = ctk.CTkFrame(
             self.scroll_frame, fg_color="#2A2A2A", corner_radius=20
         )
@@ -219,19 +221,19 @@ class HomePage(BasePage):
         
         # Заголовок
         header = ctk.CTkFrame(news_container, fg_color="transparent")
-        header.pack(fill="x", padx=25, pady=(20, 15))
+        header.pack(fill="x", padx=20, pady=(15, 10))
         
         ctk.CTkLabel(header, text="📰 Лента новостей",
-                    font=("Arial", 40, "bold"),
+                    font=("Arial", 32, "bold"),
                     text_color="white").pack(side="left")
         
         # Переключатель категорий
         self.news_topic_var = ctk.StringVar(value="cyber")
         topics = [
-            ("🛡️", "cyber", "Кибербезопасность"),
+            ("🛡️", "cyber", "Кибер"),
             ("🌍", "politics", "Политика"),
             ("💰", "economy", "Экономика"),
-            ("🚀", "tech", "Технологии"),
+            ("🚀", "tech", "Техно"),
         ]
         
         topic_frame = ctk.CTkFrame(header, fg_color="transparent")
@@ -245,31 +247,31 @@ class HomePage(BasePage):
                 fg_color="#00AAFF" if value == "cyber" else "transparent",
                 text_color="white" if value == "cyber" else "#888888",
                 hover_color="#0066AA",
-                width=200,
-                height=50,
-                corner_radius=25,
-                font=("Arial", 20)
+                width=100,
+                height=35,
+                corner_radius=17,
+                font=("Arial", 14)
             )
-            btn.pack(side="left", padx=5)
+            btn.pack(side="left", padx=3)
             setattr(self, f"news_btn_{value}", btn)
         
-        # Список новостей
+        # Список новостей — 5 элементов
         self.news_list = ctk.CTkFrame(news_container, fg_color="transparent")
-        self.news_list.pack(fill="x", padx=25, pady=15)
+        self.news_list.pack(fill="x", padx=20, pady=10)
         
         self.news_items_widgets = []
         for i in range(5):
-            widget = self._create_news_item_big(i)
+            widget = self._create_news_item(i)
             self.news_items_widgets.append(widget)
     
-    def _create_news_item_big(self, index: int):
-        """Элемент новости"""
+    def _create_news_item(self, index: int):
+        """Элемент новости УМЕНЬШЕННЫЙ"""
         item = ctk.CTkFrame(self.news_list, fg_color="transparent", height=80)
         item.pack(fill="x", pady=5)
         item.pack_propagate(False)
         
         indicator = ctk.CTkFrame(item, fg_color="gray", width=6, corner_radius=3)
-        indicator.pack(side="left", fill="y", padx=(0, 20))
+        indicator.pack(side="left", fill="y", padx=(0, 15))
         
         text_frame = ctk.CTkFrame(item, fg_color="transparent")
         text_frame.pack(side="left", fill="both", expand=True)
@@ -277,17 +279,17 @@ class HomePage(BasePage):
         title_label = ctk.CTkLabel(
             text_frame,
             text="Загрузка...",
-            font=("Arial", 25),
+            font=("Arial", 24),
             text_color="white",
             anchor="w",
             wraplength=800
         )
-        title_label.pack(fill="x", pady=(10, 5))
+        title_label.pack(fill="x", pady=(10, 3))
         
         time_label = ctk.CTkLabel(
             text_frame,
             text="",
-            font=("Arial", 24),
+            font=("Arial", 18),
             text_color="#666666",
             anchor="w"
         )
@@ -297,7 +299,7 @@ class HomePage(BasePage):
             item, text="→", width=50, height=50,
             corner_radius=25,
             fg_color="transparent", hover_color="#3A3A3A",
-            text_color="#888888", font=("Arial", 28),
+            text_color="#888888", font=("Arial", 24),
             command=lambda idx=index: self._open_news(idx)
         )
         open_btn.pack(side="right", padx=10)
@@ -310,31 +312,68 @@ class HomePage(BasePage):
             "url": None
         }
     
+    def _create_favorites_section(self):
+        """Избранное — 5 полей"""
+        fav_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+        fav_frame.pack(fill="x", pady=10)
+        
+        ctk.CTkLabel(fav_frame, text="⭐ Избранное",
+                    font=("Arial", 24, "bold"), text_color="white").pack(anchor="w")
+        
+        self.fav_container = ctk.CTkFrame(fav_frame, fg_color="#2A2A2A", corner_radius=15)
+        self.fav_container.pack(fill="x", pady=10)
+        
+        # 5 полей избранного
+        self.fav_items = []
+        for i in range(5):
+            fav_item = ctk.CTkFrame(self.fav_container, fg_color="#3A3A3A", corner_radius=10, height=50)
+            fav_item.pack(fill="x", padx=10, pady=4)
+            fav_item.pack_propagate(False)
+            
+            label = ctk.CTkLabel(fav_item, 
+                       text="Пусто",
+                       font=("Arial", 16), text_color="#666666")
+            label.pack(side="left", padx=10, pady=10)
+            
+            delete_btn = ctk.CTkButton(fav_item, text="×", width=30,
+                        fg_color="transparent", hover_color="#FF5252",
+                        command=lambda f=fav_item: f.destroy())
+            delete_btn.pack(side="right", padx=10)
+            
+            self.fav_items.append({"frame": fav_item, "label": label, "delete_btn": delete_btn})
+        
+        add_btn = ctk.CTkButton(
+            fav_frame, text="+ Добавить", command=self._add_favorite,
+            fg_color="#00AAFF", hover_color="#0088DD",
+            height=45, corner_radius=22, font=("Arial", 16, "bold")
+        )
+        add_btn.pack(pady=5)
+    
     def _create_history_section(self):
-        """История запросов"""
+        """История запросов — 5 полей"""
         hist_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
         hist_frame.pack(fill="x", pady=10)
         
-        ctk.CTkLabel(hist_frame, text="📊 История запросов",
-                    font=("Arial", 28, "bold"), text_color="white").pack(anchor="w")
+        ctk.CTkLabel(hist_frame, text="📊 История",
+                    font=("Arial", 24, "bold"), text_color="white").pack(anchor="w")
         
         self.history_list = ctk.CTkFrame(hist_frame, fg_color="#2A2A2A", corner_radius=15)
         self.history_list.pack(fill="x", pady=10)
         
         self.history_items = []
         for i in range(5):
-            item = ctk.CTkFrame(self.history_list, fg_color="transparent", height=60)
-            item.pack(fill="x", padx=15, pady=5)
+            item = ctk.CTkFrame(self.history_list, fg_color="transparent", height=50)
+            item.pack(fill="x", padx=15, pady=4)
             item.pack_propagate(False)
             
-            ctk.CTkLabel(item, text=f"#{i+1}", font=("Courier", 18),
+            ctk.CTkLabel(item, text=f"#{i+1}", font=("Courier", 16),
                         text_color="#888888").pack(side="left")
             
-            time_label = ctk.CTkLabel(item, text="", font=("Courier", 16),
+            time_label = ctk.CTkLabel(item, text="", font=("Courier", 14),
                         text_color="#666666")
             time_label.pack(side="left", padx=(15, 0))
             
-            desc_label = ctk.CTkLabel(item, text="", font=("Arial", 16),
+            desc_label = ctk.CTkLabel(item, text="", font=("Arial", 14),
                         text_color="white")
             desc_label.pack(side="left", padx=15)
             
@@ -343,35 +382,54 @@ class HomePage(BasePage):
     def _create_fab_button(self):
         """Плавающая кнопка"""
         self.fab = ctk.CTkButton(
-            self, text="🚀 Обновить всё", command=self._refresh_all,
+            self, text="🚀 Обновить", command=self._refresh_all,
             fg_color="#00AAFF", hover_color="#0088DD",
-            width=180, height=55, corner_radius=27,
-            font=("Arial", 18, "bold")
+            width=160, height=50, corner_radius=25,
+            font=("Arial", 16, "bold")
         )
         self.fab.place(relx=0.98, rely=0.98, anchor="se")
     
     # === Загрузка данных ===
     
     def _load_data_async(self):
-        """Асинхронная загрузка всех данных"""
+        """Асинхронная загрузка всех данных с мгновенным отображением"""
         self.controller.update_status("Загрузка...", "#FFFF00")
         
         def load_all():
-            # Параллельная загрузка всех данных
+            # Запускаем все задачи сразу, каждая обновляет UI самостоятельно
             with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                # Валюты — с блокировкой драйвера
+                future_currency = executor.submit(self._fetch_currency)
+                # Остальное — параллельно
+                future_weather = executor.submit(self._fetch_weather)
+                future_cyber = executor.submit(self._fetch_news, "cyber")
+                future_politics = executor.submit(self._fetch_news, "politics")
+                future_economy = executor.submit(self._fetch_news, "economy")
+                future_tech = executor.submit(self._fetch_news, "tech")
+                
+                # Обрабатываем результаты по мере готовности
                 futures = {
-                    executor.submit(self._fetch_weather): "weather",
-                    executor.submit(self._fetch_currency): "currency",
+                    future_currency: "currency",
+                    future_weather: "weather",
+                    future_cyber: "news_cyber",
+                    future_politics: "news_politics",
+                    future_economy: "news_economy",
+                    future_tech: "news_tech",
                 }
                 
                 for future in concurrent.futures.as_completed(futures):
                     task = futures[future]
                     try:
                         result = future.result()
-                        if task == "weather" and result:
-                            self.after(0, lambda: self._update_weather_ui(result))
-                        elif task == "currency" and result:
-                            self.after(0, lambda: self._update_currency_ui(result))
+                        if result:
+                            # Мгновенное обновление UI в главном потоке
+                            if task == "weather":
+                                self.after(0, lambda r=result: self._update_weather_ui(r))
+                            elif task == "currency":
+                                self.after(0, lambda r=result: self._update_currency_ui(r))
+                            elif task.startswith("news_"):
+                                topic = task.split("_")[1]
+                                self.after(0, lambda r=result, t=topic: self._update_news_ui(r["items"], t))
                     except Exception as e:
                         print(f"Ошибка загрузки {task}: {e}")
             
@@ -392,11 +450,19 @@ class HomePage(BasePage):
             return None
     
     def _fetch_currency(self) -> Optional[Dict]:
-        """Получение валют"""
+        """Получение валют — с блокировкой драйвера"""
         try:
             get_currency_data = _get_currency_module()
             driver = getattr(self.controller, 'driver', None)
-            data = get_currency_data(driver)
+            
+            if not driver:
+                print("[Currency] Драйвер не доступен")
+                return None
+            
+            # Блокируем драйвер только для этой операции
+            with self._driver_lock:
+                data = get_currency_data(driver)
+            
             self.cache["currency"]["data"] = data
             print(f"[Currency] Получено: {data}")
             return data
@@ -424,9 +490,9 @@ class HomePage(BasePage):
         print(f"[UI] Обновление погоды: {data}")
         self.weather_temp.configure(text=data.get("temp", "--°C"))
         self.weather_desc.configure(text=data.get("desc", "Нет данных"))
-        self.weather_wind.configure(text=f"💨 Ветер: {data.get('wind', '-- м/с')}")
-        self.weather_humidity.configure(text=f"💧 Влажность: {data.get('humidity', '--%')}")
-        self.weather_city.configure(text=f"📍 Город: {data.get('city', 'Белореченск')}")
+        self.weather_wind.configure(text=f"💨 {data.get('wind', '-- м/с')}")
+        self.weather_humidity.configure(text=f"💧 {data.get('humidity', '--%')}")
+        self.weather_city.configure(text=f"📍 {data.get('city', 'Белореченск')}")
         
         # Иконка по погоде
         desc = data.get("desc", "").lower()
@@ -441,9 +507,15 @@ class HomePage(BasePage):
     def _update_currency_ui(self, data: dict):
         """Обновить валюты"""
         print(f"[UI] Обновление валют: {data}")
-        for code, rate in data.items():
-            if code in self.currency_cards:
-                self.currency_cards[code]["rate"].configure(text=rate)
+        if not isinstance(data, dict):
+            print(f"[UI] Ошибка: данные валют не являются словарем: {type(data)}")
+            return
+        
+        for code in ["USD", "EUR", "BTC"]:
+            if code in self.currency_cards and code in data:
+                rate = data[code]
+                self.currency_cards[code]["rate"].configure(text=str(rate))
+                print(f"[UI] {code} обновлен: {rate}")
     
     def _update_news_ui(self, items: list, topic: str):
         """Обновить новости"""
@@ -452,6 +524,10 @@ class HomePage(BasePage):
                  "economy": "#00C853", "tech": "#FF9100"}
         color = colors.get(topic, "gray")
         
+        # Очищаем только если это текущая тема
+        if topic != self.current_news_topic:
+            return
+        
         # Очищаем
         for widget in self.news_items_widgets:
             widget["title"].configure(text="")
@@ -459,11 +535,14 @@ class HomePage(BasePage):
             widget["indicator"].configure(fg_color="gray")
             widget["url"] = None
         
-        # Заполняем
+        # Заполняем (до 5 новостей)
         for i, item in enumerate(items[:5]):
             if i < len(self.news_items_widgets):
                 widget = self.news_items_widgets[i]
                 title = item.get("title", "")
+                # Обрезаем длинные заголовки
+                if len(title) > 100:
+                    title = title[:97] + "..."
                 widget["title"].configure(text=title)
                 widget["time"].configure(text="Только что")
                 widget["indicator"].configure(fg_color=color)
@@ -508,7 +587,7 @@ class HomePage(BasePage):
         self.request_count += 1
         now = datetime.now().strftime("%H:%M")
         
-        # История
+        # История — 5 полей
         for i in range(len(self.history_items) - 1, 0, -1):
             self.history_items[i]["time"].configure(
                 text=self.history_items[i-1]["time"].cget("text"))
@@ -517,31 +596,30 @@ class HomePage(BasePage):
         
         self.history_items[0]["time"].configure(text=now)
         self.history_items[0]["desc"].configure(
-            text=f"#{self.request_count}  Погода + Валюты + Новости")
+            text=f"#{self.request_count} Обновление")
         
         self._load_data_async()
-        
-        # Загружаем новости для всех тем параллельно
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {
-                executor.submit(self._fetch_news, "cyber"): "cyber",
-                executor.submit(self._fetch_news, "politics"): "politics",
-                executor.submit(self._fetch_news, "economy"): "economy",
-                executor.submit(self._fetch_news, "tech"): "tech",
-            }
-            
-            for future in concurrent.futures.as_completed(futures):
-                topic = futures[future]
-                try:
-                    result = future.result()
-                    if result and topic == self.current_news_topic:
-                        self.after(0, lambda r=result, t=topic: self._update_news_ui(r["items"], t))
-                except Exception as e:
-                    print(f"Ошибка загрузки новостей {topic}: {e}")
     
     def _change_city(self):
         """Сменить город"""
-        dialog = ctk.CTkInputDialog(text="Введите город:", title="Смена города", width=600, height=300)
+        dialog = ctk.CTkInputDialog(text="Введите город:", title="Смена города")
+        dialog.geometry("900x450")  # Увеличено в 3 раза
+        
+        # Увеличиваем все элементы пропорционально
+        dialog.update()  # Обновляем диалог перед изменением виджетов
+        
+        def scale_widgets(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ctk.CTkLabel):
+                    child.configure(font=("Arial", 48, "bold"))  # Увеличенный шрифт
+                elif isinstance(child, ctk.CTkEntry):
+                    child.configure(height=90, font=("Arial", 42))
+                elif isinstance(child, ctk.CTkButton):
+                    child.configure(height=90, font=("Arial", 42))
+                scale_widgets(child)  # Рекурсивно
+        
+        scale_widgets(dialog)
+        
         city = dialog.get_input()
         if city:
             self.cache["weather"]["city"] = city
@@ -554,3 +632,16 @@ class HomePage(BasePage):
             if url and url.startswith("http"):
                 import webbrowser
                 webbrowser.open(url)
+    
+    def _add_favorite(self):
+        """Добавить в избранное — заполняем первое пустое поле"""
+        weather_data = self.cache["weather"].get("data")
+        if weather_data:
+            # Ищем первое пустое поле
+            for fav in self.fav_items:
+                if fav["label"].cget("text") == "Пусто":
+                    fav["label"].configure(
+                        text=f"🌤️ {weather_data.get('city', '')}: {weather_data.get('temp', '')}",
+                        text_color="white"
+                    )
+                    return

@@ -9,6 +9,18 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from typing import List, Dict, Optional
 import time
+from .driver_lock import lock as _driver_lock
+
+
+# Кэш новостей
+_news_cache = {
+    "cyber": [],
+    "politics": [],
+    "economy": [],
+    "tech": [],
+    "timestamp": 0
+}
+CACHE_TTL = 300  # 5 минут
 
 
 # Конфигурация источников новостей
@@ -111,57 +123,70 @@ def get_news_data(driver, topic: str = "cyber") -> List[Dict[str, str]]:
     Ускоренное получение новостей.
     Использует явные ожидания вместо фиксированных задержек.
     """
+    # Проверяем кэш
+    current_time = time.time()
+    if (_news_cache[topic] and 
+        (current_time - _news_cache["timestamp"]) < CACHE_TTL):
+        print(f"🔍 [News] {NEWS_SITES[topic]['name']} — из кэша ({len(_news_cache[topic])} новостей)")
+        return _news_cache[topic]
+    
     if not _safe_driver_check(driver):
         return [{"title": "Сессия потеряна", "summary": "WebDriver не отвечает"}]
     
-    config = NEWS_SITES.get(topic, NEWS_SITES["economy"])
-    
-    try:
-        print(f"🔍 [News] {config['name']} — загрузка...")
+    # Блокируем доступ к драйверу
+    with _driver_lock:
+        config = NEWS_SITES.get(topic, NEWS_SITES["economy"])
         
-        # Загружаем страницу
-        driver.get(config["url"])
-        
-        # Быстрое ожидание ключевого элемента (макс timeout секунд)
-        wait = WebDriverWait(driver, config["timeout"])
-        wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, config["wait_selector"])
-        ))
-        
-        # Дополнительная микро-задержка для стабильности (опционально)
-        # time.sleep(0.5)  # Раскомментировать если нужна стабильность
-        
-        # Быстрый парсинг
-        news_items = _fast_parse_titles(driver, config["title_selectors"], max_items=5)
-        
-        if not news_items:
-            # Fallback: любые ссылки
-            links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
-            for link in links[:15]:
-                try:
-                    title = link.text.strip()
-                    href = link.get_attribute("href")
-                    if title and 20 < len(title) < 100 and href and 'http' in href:
-                        news_items.append({
-                            "title": title[:120],
+        try:
+            print(f"🔍 [News] {config['name']} — загрузка...")
+            
+            # Загружаем страницу
+            driver.get(config["url"])
+            
+            # Быстрое ожидание ключевого элемента (макс timeout секунд)
+            wait = WebDriverWait(driver, config["timeout"])
+            wait.until(EC.presence_of_element_located(
+                (By.CSS_SELECTOR, config["wait_selector"])
+            ))
+            
+            # Дополнительная микро-задержка для стабильности (опционально)
+            # time.sleep(0.5)  # Раскомментировать если нужна стабильность
+            
+            # Быстрый парсинг
+            news_items = _fast_parse_titles(driver, config["title_selectors"], max_items=5)
+            
+            if not news_items:
+                # Fallback: любые ссылки
+                links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
+                for link in links[:15]:
+                    try:
+                        title = link.text.strip()
+                        href = link.get_attribute("href")
+                        if title and 20 < len(title) < 100 and href and 'http' in href:
+                            news_items.append({
+                                "title": title[:120],
                             "summary": "",
                             "url": href
                         })
                         if len(news_items) >= 3:
                             break
-                except:
-                    continue
-        
-        print(f"   ✅ Найдено: {len(news_items)} новостей")
-        return news_items if news_items else [{"title": "Новости не найдены", "summary": ""}]
-        
-    except TimeoutException:
-        print(f"   ⚠️ Таймаут загрузки")
-        return [{"title": "Таймаут загрузки", "summary": "Страница загружается слишком долго"}]
-        
-    except Exception as e:
-        print(f"   ❌ Ошибка: {e}")
-        return [{"title": "Ошибка загрузки", "summary": str(e)[:50]}]
+                    except:
+                        continue
+            
+            # Сохраняем в кэш
+            _news_cache[topic] = news_items
+            _news_cache["timestamp"] = current_time
+            
+            print(f"   ✅ Найдено: {len(news_items)} новостей")
+            return news_items if news_items else [{"title": "Новости не найдены", "summary": ""}]
+            
+        except TimeoutException:
+            print(f"   ⚠️ Таймаут загрузки")
+            return [{"title": "Таймаут загрузки", "summary": "Страница загружается слишком долго"}]
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка: {e}")
+            return [{"title": "Ошибка загрузки", "summary": str(e)[:50]}]
 
 
 def format_news_for_display(news_items: List[Dict[str, str]], topic_name: str) -> str:
