@@ -5,112 +5,186 @@ class AboutPage(BasePage):
     """Страница информации о программе"""
     
     def create_widgets(self):
-        # Контейнер для центрирования
-        container = ctk.CTkFrame(self, fg_color="transparent")
-        container.pack(expand=True)
+        # Скроллируемая область
+        scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
-        # Логотип/Иконка
+        # === ЗАГОЛОВОК ===
+        header_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 30))
+        
         icon_label = ctk.CTkLabel(
-            container,
+            header_frame,
             text="⚡",
-            font=("Arial", 120),
+            font=("Arial", 80),
             text_color="#00AAFF"
         )
-        icon_label.pack(pady=20)
+        icon_label.pack()
         
-        # Название
         name_label = ctk.CTkLabel(
-            container,
-            text="QuickTab",
+            header_frame,
+            text="QuickTab v0.7.0",
             font=("Arial", 48, "bold"),
             text_color="#FFFFFF"
         )
         name_label.pack()
         
-        # Версия
-        try:
-            from quicktab import __version__
-        except ImportError:
-            __version__ = "0.6.0"
-        
-        version_label = ctk.CTkLabel(
-            container,
-            text=f"версия {__version__}",
+        tagline = ctk.CTkLabel(
+            header_frame,
+            text="Универсальный информационный хаб",
             font=("Arial", 24),
-            text_color="#888888"
+            text_color="#00AAFF"
         )
-        version_label.pack(pady=5)
+        tagline.pack(pady=(5, 0))
         
-        # Описание
-        desc_frame = ctk.CTkFrame(container, fg_color="#2a2a2a", border_width=1, border_color="#444444")
-        desc_frame.pack(pady=30, padx=50, fill="x")
+        # === ОБ ПРИЛОЖЕНИИ ===
+        about_card = self._create_card(scroll_frame, "ℹ️ О приложении", 
+            "QuickTab — это быстрый и удобный способ получить информацию без переключения вкладок.\n\n"
+            "Просто спросите в поиске то, что вам нужно — погода, курсы валют, новости, ответы на вопросы. "
+            "Все данные загружаются мгновенно прямо в приложении!")
         
-        description = (
-            "Быстрый доступ к информации:\n\n"
-            "• 🌤️ Погода в реальном времени\n"
-            "• 💱 Актуальные курсы валют\n"
-            "• 📰 Новости по категориям\n\n"
-            "Создано для удобства и скорости!"
+        # === ОСНОВНЫЕ ФУНКЦИИ ===
+        features_card = ctk.CTkFrame(scroll_frame, fg_color="#2a2a2a", corner_radius=15)
+        features_card.pack(fill="x", pady=15, ipady=15)
+        
+        features_title = ctk.CTkLabel(
+            features_card,
+            text="🎯 Функции",
+            font=("Arial", 32, "bold"),
+            text_color="#00AAFF"
         )
+        features_title.pack(pady=(15, 10), anchor="w", padx=20)
         
-        desc_label = ctk.CTkLabel(
-            desc_frame,
-            text=description,
-            font=("Arial", 24),
-            text_color="#FFFFFF",
-            justify="center"
+        features = [
+            ("🌤️", "Погода", "Актуальная информация с деталями"),
+            ("💱", "Валюты", "Курсы USD, EUR, BTC в реальном времени"),
+            ("📰", "Новости", "Категории: кибер, политика, экономика, технологии"),
+            ("🤖", "ИИ-ответы", "Google Gemini для ответов на любые вопросы"),
+            ("🔍", "Поиск", "Умный поиск с веб-ссылками и Wikipedia"),
+        ]
+        
+        for emoji, title, desc in features:
+            feature_frame = ctk.CTkFrame(features_card, fg_color="transparent")
+            feature_frame.pack(fill="x", padx=20, pady=8)
+            
+            ctk.CTkLabel(
+                feature_frame,
+                text=f"{emoji} {title}",
+                font=("Arial", 24, "bold"),
+                text_color="#FFFFFF"
+            ).pack(anchor="w")
+            
+            ctk.CTkLabel(
+                feature_frame,
+                text=desc,
+                font=("Arial", 20),
+                text_color="#AAAAAA"
+            ).pack(anchor="w", padx=(40, 0))
+        
+        # === ТЕХНОЛОГИИ ===
+        tech_card = self._create_card(scroll_frame, "⚙️ Технологии",
+            "Python 3.8+ • CustomTkinter • Selenium 4.15\n"
+            "Google Gemini AI • BeautifulSoup • Requests\n\n"
+            "Открытые источники: Яндекс.Погода, CoinMarketCap, CoinTelegraph")
+        
+        # === БЫСТРЫЕ ПРИМЕРЫ ===
+        examples_card = ctk.CTkFrame(scroll_frame, fg_color="#2a2a2a", corner_radius=15)
+        examples_card.pack(fill="x", pady=15, ipady=15)
+        
+        examples_title = ctk.CTkLabel(
+            examples_card,
+            text="💡 Примеры запросов",
+            font=("Arial", 32, "bold"),
+            text_color="#FF9100"
         )
-        desc_label.pack(pady=30, padx=30)
+        examples_title.pack(pady=(15, 10), anchor="w", padx=20)
         
-        # Технологии
-        tech_frame = ctk.CTkFrame(container, fg_color="transparent")
-        tech_frame.pack(pady=10)
+        examples = [
+            "Погода в Москве",
+            "Курс доллара",
+            "100 долларов в рубли",
+            "Что такое искусственный интеллект?",
+            "2+2*3",
+            "Новости кибербезопасности"
+        ]
         
-        tech_label = ctk.CTkLabel(
-            tech_frame,
-            text="Технологии:",
-            font=("Arial", 20, "bold"),
-            text_color="#888888"
-        )
-        tech_label.pack()
+        for example in examples:
+            example_frame = ctk.CTkFrame(examples_card, fg_color="#333333", corner_radius=8)
+            example_frame.pack(fill="x", padx=20, pady=5)
+            
+            ctk.CTkLabel(
+                example_frame,
+                text=f"  📌 {example}",
+                font=("Arial", 20),
+                text_color="#00AAFF"
+            ).pack(anchor="w", pady=8)
         
-        techs = ctk.CTkLabel(
-            tech_frame,
-            text="Python • CustomTkinter • Selenium",
-            font=("Arial", 18),
-            text_color="#666666"
-        )
-        techs.pack()
+        # === ИНФОРМАЦИЯ ===
+        info_card = self._create_card(scroll_frame, "📋 Информация",
+            "Автор: Yaroslav Belov\n"
+            "Локация: Белореченск, Краснодарский край\n"
+            "Год: 2026\n\n"
+            "Лицензия: MIT\n"
+            "GitHub: github.com/yaroslav-belov101/QuickTab")
         
-        # Копирайт
-        copyright_label = ctk.CTkLabel(
-            container,
-            text="© 2024 QuickTab Team",
-            font=("Arial", 16),
-            text_color="#444444"
-        )
-        copyright_label.pack(pady=30)
+        # === КНОПКА ОБНОВЛЕНИЯ ===
+        button_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        button_frame.pack(fill="x", pady=20)
         
-        # Кнопка проверки обновлений
         update_btn = ctk.CTkButton(
-            container,
-            text="🔄 Проверить обновления",
+            button_frame,
+            text="🔄 Версия 0.6.0 (актуальная)",
             command=self.check_updates,
-            fg_color="#4a4a4a",
-            hover_color="#666666",
-            height=40,
-            font=("Arial", 20)
+            fg_color="#00AAFF",
+            hover_color="#0088CC",
+            height=50,
+            font=("Arial", 24, "bold"),
+            text_color="#000000",
+            corner_radius=12
         )
         update_btn.pack(pady=10)
+        
+        # === НИЖНИЙ ТЕКСТ ===
+        footer = ctk.CTkLabel(
+            scroll_frame,
+            text="© 2026 QuickTab • Спасибо за использование! ⭐",
+            font=("Arial", 18),
+            text_color="#555555"
+        )
+        footer.pack(pady=(20, 0))
+    
+    def _create_card(self, parent, title: str, content: str):
+        """Создать красивую карточку"""
+        card = ctk.CTkFrame(parent, fg_color="#2a2a2a", corner_radius=15)
+        card.pack(fill="x", pady=15, ipady=15)
+        
+        title_label = ctk.CTkLabel(
+            card,
+            text=title,
+            font=("Arial", 32, "bold"),
+            text_color="#00AAFF"
+        )
+        title_label.pack(pady=(15, 10), anchor="w", padx=20)
+        
+        content_label = ctk.CTkLabel(
+            card,
+            text=content,
+            font=("Arial", 21),
+            text_color="#CCCCCC",
+            justify="left",
+            wraplength=700
+        )
+        content_label.pack(pady=10, anchor="w", padx=20, fill="x")
+        
+        return card
     
     def check_updates(self):
         """Проверить наличие обновлений"""
         import tkinter.messagebox as msgbox
         
-        # Заглушка для проверки обновлений
         msgbox.showinfo(
-            "Обновления",
-            "У вас установлена последняя версия!\n\n"
-            "Текущая версия: 0.6.0\n"
-            "Последняя версия: 0.6.0"
+            "Версия",
+            "QuickTab v0.7.0\n\n"
+            "✅ У вас установлена последняя версия!\n\n"
+            "Спасибо за использование приложения! ⭐"
         )

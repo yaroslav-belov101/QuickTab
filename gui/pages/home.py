@@ -247,10 +247,11 @@ class HomePage(BasePage):
                 fg_color="#00AAFF" if value == "cyber" else "transparent",
                 text_color="white" if value == "cyber" else "#888888",
                 hover_color="#0066AA",
-                width=100,
+                width=225,
                 height=35,
-                corner_radius=17,
-                font=("Arial", 14)
+                corner_radius=39,
+                font=("Arial", 32),
+                anchor="center"
             )
             btn.pack(side="left", padx=3)
             setattr(self, f"news_btn_{value}", btn)

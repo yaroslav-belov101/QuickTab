@@ -6,6 +6,7 @@ import threading
 import webbrowser
 import re
 import time
+import google.generativeai as genai
 
 
 class SearchPage(BasePage):
@@ -16,6 +17,8 @@ class SearchPage(BasePage):
         self.current_results = []
         self.quick_answer = None
         self.web_links = []
+        self.last_ai_query = None  # Для сохранения последнего вопроса к ИИ
+        self.ai_context = None  # Для сохранения контекста диалога
         super().__init__(parent, controller)
     
     def create_widgets(self):
@@ -298,7 +301,7 @@ class SearchPage(BasePage):
         # === ЭТАП 1: Формируем краткую сводку ===
         self.update_loading_status("Формируем краткую сводку...")
         
-        quick_answer = self._get_quick_answer(query, query_lower)
+        quick_answer = self._get_quick_answer(query, query_lower, self.ai_context)
         
         # === ЭТАП 2: Ищем ссылки в интернете ===
         self.update_loading_status("Ищем ссылки в интернете...")
@@ -308,10 +311,12 @@ class SearchPage(BasePage):
         # === ЭТАП 3: Показываем результаты ===
         self.quick_answer = quick_answer
         self.web_links = web_links
+        self.last_ai_query = query  # Сохраняем последний запрос
+        self.ai_context = None  # Очищаем контекст после использования
         
         self.after(0, lambda: self._display_results(query, quick_answer, web_links))
     
-    def _get_quick_answer(self, query: str, query_lower: str) -> Optional[Dict]:
+    def _get_quick_answer(self, query: str, query_lower: str, context: Optional[str] = None) -> Optional[Dict]:
         """Получить краткую сводку из всех источников"""
         
         # 1. Валюты
@@ -342,6 +347,11 @@ class SearchPage(BasePage):
         math_result = self._calculate_math(query)
         if math_result:
             return math_result
+        
+        # 6. ИИ для произвольных вопросов
+        ai_result = self._query_gemini(query, context)
+        if ai_result:
+            return ai_result
         
         return None
     
@@ -450,7 +460,8 @@ class SearchPage(BasePage):
             "weather": "#2979FF",
             "news": "#FF9100",
             "wiki": "#9C27B0",
-            "math": "#FF5722"
+            "math": "#FF5722",
+            "ai": "#FF6D00"
         }
         color = colors.get(answer["type"], "#00AAFF")
         
@@ -460,7 +471,8 @@ class SearchPage(BasePage):
             "weather": "🌤️",
             "news": "📰",
             "wiki": "📚",
-            "math": "🧮"
+            "math": "🧮",
+            "ai": "🤖"
         }
         icon = icons.get(answer["type"], "💡")
         
@@ -627,6 +639,20 @@ class SearchPage(BasePage):
         
         if rtype in ["currency", "converter", "weather", "news"]:
             self.controller.show_frame("HomePage")
+        elif rtype == "ai":
+            # Для уточнения вопроса: сохраняем контекст и показываем подсказку
+            self.ai_context = answer.get("content", "")  # Сохраняем ответ как контекст
+            self.search_entry.delete(0, "end")
+            self.search_entry.focus()
+            # Подсвечиваем, что это уточнение
+            hint = ctk.CTkLabel(
+                self.content_frame,
+                text="💬 Режим уточнения (введите дополнительный вопрос)",
+                font=("Arial", 18),
+                text_color="#00FF00"
+            )
+            hint.pack(pady=5)
+            self.after(3000, hint.destroy)  # Удалить подсказку через 3 секунды
         elif answer.get("url"):
             webbrowser.open(answer["url"])
     
@@ -1152,3 +1178,35 @@ class SearchPage(BasePage):
         
         print(f"[Search] Найдено {len(results)} веб-результатов")
         return results
+    
+    def _query_gemini(self, query: str, context: Optional[str] = None) -> Optional[Dict]:
+        """Запрос к Google Gemini для произвольных вопросов"""
+        try:
+            import config
+            if not config.GEMINI_API_KEY:
+                print("[Search] GEMINI_API_KEY не найден")
+                return None
+            
+            genai.configure(api_key=config.GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # Если есть контекст, это уточнение
+            if context:
+                prompt = f"Коротко я ответил на вопрос:\n\"{context}\"\n\nТеперь пользователь уточняет: \"{query}\"\n\nОтвети на уточнение на русском языке, как продолжение предыдущего ответа. Будь полезным и информативным."
+            else:
+                prompt = f"Ответь кратко и точно на русском языке на вопрос: {query}. Будь полезным и информативным."
+            
+            response = model.generate_content(prompt)
+            
+            if response and response.text:
+                answer = response.text.strip()
+                return {
+                    "type": "ai",
+                    "title": "🤖 ИИ-ответ",
+                    "content": answer,
+                    "action": "Задать уточнение"
+                }
+        except Exception as e:
+            print(f"[Search] Ошибка Gemini: {e}")
+            return None
+        return None

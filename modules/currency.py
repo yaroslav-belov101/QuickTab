@@ -44,8 +44,19 @@ def _parse_rates_fast(driver) -> Dict[str, str]:
     
     try:
         # Ищем таблицу с курсами
-        table = driver.find_element(By.CSS_SELECTOR, "table.data")
-        print(f"   Найдена таблица с классом 'data'")
+        table_selectors = ["table.data", "table", ".table", "#content table"]
+        table = None
+        for sel in table_selectors:
+            try:
+                table = driver.find_element(By.CSS_SELECTOR, sel)
+                print(f"   Найдена таблица с селектором '{sel}'")
+                break
+            except:
+                continue
+        
+        if not table:
+            print("   ❌ Таблица не найдена")
+            return {"USD": usd, "EUR": eur}
         
         # Ищем все строки таблицы
         rows = table.find_elements(By.TAG_NAME, "tr")
@@ -72,6 +83,27 @@ def _parse_rates_fast(driver) -> Dict[str, str]:
             except Exception as e:
                 print(f"     Ошибка в строке {i}: {e}")
                 continue
+        
+        # Если не найдено, пробуем поиск по тексту
+        if usd == "Нет данных":
+            try:
+                usd_elements = driver.find_elements(By.XPATH, "//td[contains(text(), 'USD') or contains(text(), '840')]/following-sibling::td[4]")
+                if usd_elements:
+                    rate = usd_elements[0].text.strip().replace(',', '.')
+                    usd = f"{rate} ₽"
+                    print(f"   ✅ USD найден по тексту: {usd}")
+            except:
+                pass
+        
+        if eur == "Нет данных":
+            try:
+                eur_elements = driver.find_elements(By.XPATH, "//td[contains(text(), 'EUR') or contains(text(), '978')]/following-sibling::td[4]")
+                if eur_elements:
+                    rate = eur_elements[0].text.strip().replace(',', '.')
+                    eur = f"{rate} ₽"
+                    print(f"   ✅ EUR найден по тексту: {eur}")
+            except:
+                pass
         
         if usd == "Нет данных" or eur == "Нет данных":
             print(f"   ⚠️ Не все валюты найдены: USD={usd}, EUR={eur}")

@@ -15,7 +15,7 @@ class Dashboard(ctk.CTkFrame):
     ]
     
     def __init__(self, parent, navigation_callback: Callable[[str], None], 
-                 version: str = "0.6.0", **kwargs):
+                 version: str = "0.7.0", **kwargs):
         super().__init__(parent, fg_color="#0D0D0D", width=320, **kwargs)
         
         self.pack_propagate(False)
