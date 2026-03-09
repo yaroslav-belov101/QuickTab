@@ -3,7 +3,7 @@
   "color_scheme": "Синяя",
   "headless": true,
   "user_agent": "",
-  "default_city": "Белореченск",
+  "default_city": "",
   "cache_enabled": true,
   "auto_update_interval": 5,
   "window_size": "1200x800",
