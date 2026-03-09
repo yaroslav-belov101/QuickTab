@@ -1,7 +1,7 @@
 # Python
 __pycache__/
 env/
-.env/
+
 
 # QuickTab Firefox Profile
 .quicktab-profile/
@@ -9,7 +9,7 @@ env/
 .moz*
 .selenium-profile/
 # Environment
-.env
+
 
 # IDE/OS
 .vscode/
