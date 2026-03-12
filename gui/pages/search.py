@@ -6,21 +6,61 @@ import threading
 import webbrowser
 import re
 import time
-import requests
 import json
+import asyncio
+import aiohttp
+import concurrent.futures
+from functools import partial
+
+# Скомпилированные regex для производительности
+RE_MARKDOWN_BOLD = re.compile(r'\*\*')
+RE_MARKDOWN_ITALIC = re.compile(r'(?<!\*)\*(?!\*)')
+RE_MARKDOWN_CODE = re.compile(r'`')
+RE_MARKDOWN_HEADER = re.compile(r'#+ ')
+RE_MARKDOWN_LINK = re.compile(r'\[([^\]]+)\]\([^)]+\)')
+RE_HTML_TAGS = re.compile(r'<[^>]+>')
+RE_MULTIPLE_SPACES = re.compile(r' +')
+RE_MULTIPLE_NEWLINES = re.compile(r'\n{3,}')
+
+# Thread pool для async операций
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 
 class SearchPage(BasePage):
-    """Страница поиска с краткой сводкой и ссылками"""
+    """Страница поиска с краткой сводкой и ссылками — неблокирующая версия"""
     
     def __init__(self, parent, controller):
         self.search_history = []
         self.current_results = []
         self.quick_answer = None
         self.web_links = []
-        self.last_ai_query = None  # Для сохранения последнего вопроса к ИИ
-        self.ai_context = None  # Для сохранения контекста диалога
+        self.last_ai_query = None
+        self.ai_context = None
+        # Event loop для async операций в отдельном потоке
+        self._loop = None
+        self._loop_thread = None
+        self._init_async_loop()
         super().__init__(parent, controller)
+    
+    def _init_async_loop(self):
+        """Инициализация event loop в отдельном потоке"""
+        def run_loop():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+        
+        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._loop_thread.start()
+        # Ждем запуска loop
+        while self._loop is None:
+            time.sleep(0.01)
+    
+    def _run_async(self, coro):
+        """Запускает корутину в отдельном event loop"""
+        if self._loop and self._loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            return future
+        return None
     
     def create_widgets(self):
         # Заголовок
@@ -178,7 +218,7 @@ class SearchPage(BasePage):
             widget.destroy()
     
     def perform_search(self):
-        """Выполнить поиск"""
+        """Выполнить поиск (неблокирующий)"""
         query = self.search_entry.get().strip()
         
         if not query:
@@ -191,8 +231,8 @@ class SearchPage(BasePage):
         # Показываем загрузку
         self.show_loading()
         
-        # Запускаем поиск в отдельном потоке
-        threading.Thread(target=self._do_search, args=(query,), daemon=True).start()
+        # Запускаем поиск в отдельном потоке с async
+        threading.Thread(target=self._do_search_thread, args=(query,), daemon=True).start()
     
     def add_to_history(self, query: str):
         """Добавить запрос в историю"""
@@ -231,7 +271,7 @@ class SearchPage(BasePage):
         progress.start()
     
     def update_loading_status(self, text: str):
-        """Обновить статус загрузки"""
+        """Обновить статус загрузки (thread-safe)"""
         if hasattr(self, 'loading_status'):
             self.after(0, lambda: self.loading_status.configure(text=text))
     
@@ -257,54 +297,27 @@ class SearchPage(BasePage):
             hover_color="#666666"
         ).pack(pady=10)
     
-    def _get_homepage_data(self):
-        """Получить данные с главной страницы через контроллер"""
-        try:
-            homepage = None
-            
-            if hasattr(self.controller, 'pages'):
-                homepage = self.controller.pages.get('home')
-            
-            if not homepage and hasattr(self.controller, 'frames'):
-                homepage = self.controller.frames.get('home')
-            
-            if not homepage and hasattr(self.controller, 'home_page'):
-                homepage = self.controller.home_page
-            
-            if not homepage:
-                for attr_name in dir(self.controller):
-                    attr = getattr(self.controller, attr_name, None)
-                    if hasattr(attr, 'cache') and isinstance(attr.cache, dict) and 'weather' in attr.cache:
-                        homepage = attr
-                        break
-            
-            return homepage
-        except Exception as e:
-            print(f"[Search] Ошибка получения HomePage: {e}")
-            return None
-    
-    def _get_driver(self):
-        """Получить WebDriver из контроллера"""
-        try:
-            driver = getattr(self.controller, 'driver', None)
-            if driver:
-                return driver
-        except:
-            pass
-        return None
-    
-    def _do_search(self, query: str):
-        """Фактический поиск: сначала сводка, потом ссылки"""
+    def _do_search_thread(self, query: str):
+        """Поток поиска с async операциями"""
         query_lower = query.lower()
         
         print(f"[Search] Начало поиска: '{query}'")
         
-        # === ЭТАП 1: Формируем краткую сводку ===
+        # === ЭТАП 1: Формируем краткую сводку (async) ===
         self.update_loading_status("Формируем краткую сводку...")
         
-        quick_answer = self._get_quick_answer(query, query_lower, self.ai_context)
+        # Запускаем async задачу для ИИ и других HTTP-запросов
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        # === ЭТАП 2: Ищем ссылки в интернете ===
+        try:
+            quick_answer = loop.run_until_complete(
+                self._get_quick_answer_async(query, query_lower, self.ai_context)
+            )
+        finally:
+            loop.close()
+        
+        # === ЭТАП 2: Ищем ссылки (в отдельном потоке) ===
         self.update_loading_status("Ищем ссылки в интернете...")
         
         web_links = self._get_web_links(query)
@@ -312,77 +325,175 @@ class SearchPage(BasePage):
         # === ЭТАП 3: Показываем результаты ===
         self.quick_answer = quick_answer
         self.web_links = web_links
-        self.last_ai_query = query  # Сохраняем последний запрос
-        self.ai_context = None  # Очищаем контекст после использования
+        self.last_ai_query = query
+        self.ai_context = None
         
         self.after(0, lambda: self._display_results(query, quick_answer, web_links))
     
-    def _get_quick_answer(self, query: str, query_lower: str, context: Optional[str] = None) -> Optional[Dict]:
-        """Получить краткую сводку из всех источников"""
+    async def _get_quick_answer_async(self, query: str, query_lower: str, context: Optional[str] = None) -> Optional[Dict]:
+        """Async версия получения краткой сводки"""
         
-        # 1. Валюты
+        # 1. Валюты (синхронно, быстро — из кэша)
         if any(kw in query_lower for kw in ["курс", "цена", "стоимость", "доллар", "евро", "биткоин", "usd", "eur", "btc"]):
             result = self._search_currency(query_lower, query)
             if result:
                 return result
         
-        # 2. Погода
+        # 2. Погода (синхронно, быстро — из кэша/API)
         if any(kw in query_lower for kw in ["погода", "температура", "градус"]):
             result = self._search_weather(query_lower, query)
             if result:
                 return result
         
-        # 3. Новости
+        # 3. Новости (синхронно, быстро — из кэша)
         if any(kw in query_lower for kw in ["новост", "событ"]):
             result = self._search_news(query_lower, query)
             if result:
                 return result
         
-        # 4. Wikipedia для знаний
+        # 4. Wikipedia для знаний (async HTTP)
         if self._is_knowledge_query(query_lower):
-            result = self._search_wikipedia(query)
+            result = await self._search_wikipedia_async(query)
             if result:
                 return result
         
-        # 5. Калькулятор
+        # 5. Калькулятор (синхронно)
         math_result = self._calculate_math(query)
         if math_result:
             return math_result
         
-        # 6. ИИ для произвольных вопросов (OpenRouter вместо Gemini)
-        ai_result = self._query_openrouter(query, context)
+        # 6. ИИ для произвольных вопросов (async HTTP)
+        ai_result = await self._query_openrouter_async(query, context)
         if ai_result:
             return ai_result
         
         return None
     
+    async def _search_wikipedia_async(self, query: str) -> Optional[Dict]:
+        """Async поиск в Wikipedia через HTTP API"""
+        try:
+            # Используем Wikipedia API вместо Selenium
+            search_term = query.replace(' ', '+')
+            if 'что такое' in query.lower():
+                search_term = query.lower().replace('что такое', '').strip().replace(' ', '+')
+            
+            url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={search_term}&format=json&srlimit=1"
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        search_results = data.get('query', {}).get('search', [])
+                        
+                        if search_results:
+                            title = search_results[0]['title']
+                            snippet = search_results[0]['snippet']
+                            # Очищаем HTML из сниппета
+                            clean_snippet = RE_HTML_TAGS.sub('', snippet)
+                            
+                            # Получаем полную статью
+                            page_url = f"https://ru.wikipedia.org/wiki/{title.replace(' ', '_')}"
+                            
+                            return {
+                                "type": "wiki",
+                                "title": title,
+                                "content": clean_snippet[:300] + "..." if len(clean_snippet) > 300 else clean_snippet,
+                                "url": page_url,
+                                "action": "Открыть статью"
+                            }
+        except Exception as e:
+            print(f"[Search] Ошибка Wikipedia API: {e}")
+        
+        return None
+    
+    async def _query_openrouter_async(self, query: str, context: Optional[str] = None) -> Optional[Dict]:
+        """Async запрос к OpenRouter API"""
+        try:
+            import config
+            
+            if config.USE_AI_PROVIDER != "openrouter" or not config.OPENROUTER_API_KEY:
+                print("[Search] OpenRouter не настроен")
+                return None
+            
+            if context:
+                prompt = f"Коротко я ответил на вопрос:\n\"{context}\"\n\nТеперь пользователь уточняет: \"{query}\"\n\nОтвети на уточнение на русском языке, как продолжение предыдущего ответа. Будь полезным и информативным."
+            else:
+                prompt = f"Ответь кратко и точно на русском языке на вопрос: {query}. Будь полезным и информативным."
+            
+            headers = {
+                "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://quicktab.local",
+                "X-Title": "QuickTab"
+            }
+            
+            data = {
+                "model": config.OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=data
+                ) as response:
+                    
+                    if response.status == 200:
+                        result = await response.json()
+                        if "choices" in result and len(result["choices"]) > 0:
+                            answer = result["choices"][0]["message"]["content"].strip()
+                            self._full_ai_answer = answer
+                            self._last_ai_query = query
+                            
+                            return {
+                                "type": "ai",
+                                "title": "ИИ-ответ",
+                                "content": answer[:300] + "..." if len(answer) > 300 else answer,
+                                "action": "Показать полный ответ"
+                            }
+                    else:
+                        print(f"[Search] Ошибка OpenRouter: {response.status}")
+                        
+        except asyncio.TimeoutError:
+            print("[Search] Таймаут OpenRouter")
+        except Exception as e:
+            print(f"[Search] Ошибка OpenRouter: {e}")
+            
+        return None
+    
     def _get_web_links(self, query: str) -> List[Dict]:
-        """Получить ссылки из веб-поиска"""
+        """Получить ссылки из веб-поиска (упрощенная версия без Selenium)"""
         links = []
         
-        # Пробуем DuckDuckGo
-        ddg_results = self._search_duckduckgo(query)
-        if ddg_results:
-            links.extend(ddg_results)
+        # Добавляем прямые ссылки на поисковики (быстро, без блокировки)
+        links.append({
+            "type": "search_engine",
+            "title": "🔍 DuckDuckGo",
+            "content": "Поискать в DuckDuckGo",
+            "url": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
+            "action": "Открыть"
+        })
+        links.append({
+            "type": "search_engine", 
+            "title": "🌐 Google",
+            "content": "Поискать в Google",
+            "url": f"https://google.com/search?q={query.replace(' ', '+')}",
+            "action": "Открыть"
+        })
+        links.append({
+            "type": "search_engine",
+            "title": "📚 Wikipedia",
+            "content": "Поискать в Wikipedia",
+            "url": f"https://ru.wikipedia.org/wiki/Special:Search?search={query.replace(' ', '+')}",
+            "action": "Открыть"
+        })
         
-        # Если мало результатов, добавляем прямые ссылки на поисковики
-        if len(links) < 3:
-            links.append({
-                "type": "search_engine",
-                "title": "🔍 DuckDuckGo",
-                "content": "Поискать в DuckDuckGo",
-                "url": f"https://duckduckgo.com/?q={query.replace(' ', '+')}",
-                "action": "Открыть"
-            })
-            links.append({
-                "type": "search_engine", 
-                "title": "🌐 Google",
-                "content": "Поискать в Google",
-                "url": f"https://google.com/search?q={query.replace(' ', '+')}",
-                "action": "Открыть"
-            })
-        
-        return links[:8]
+        return links
     
     def _display_results(self, query: str, quick_answer: Optional[Dict], web_links: List[Dict]):
         """Отобразить результаты: сводка сверху, ссылки снизу"""
@@ -454,41 +565,30 @@ class SearchPage(BasePage):
             self._create_link_card(link)
     
     def _clean_text(self, text: str) -> str:
-        """
-        ИСПРАВЛЕНО: Очистка текста от лишних символов и форматирования
-        """
+        """Оптимизированная очистка текста с скомпилированными regex"""
         if not text:
             return ""
         
-        # Убираем markdown-разметку
-        text = re.sub(r'\*\*', '', text)  # Жирный текст **text**
-        text = re.sub(r'\*', '', text)     # Курсив *text*
-        text = re.sub(r'`', '', text)      # Код `text`
-        text = re.sub(r'#+ ', '', text)    # Заголовки # ## ###
-        
-        # Убираем ссылки в markdown-формате [text](url) → text
-        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-        
-        # Убираем HTML-теги
-        text = re.sub(r'<[^>]+>', '', text)
+        # Используем скомпилированные regex
+        text = RE_MARKDOWN_BOLD.sub('', text)
+        text = RE_MARKDOWN_ITALIC.sub('', text)
+        text = RE_MARKDOWN_CODE.sub('', text)
+        text = RE_MARKDOWN_HEADER.sub('', text)
+        text = RE_MARKDOWN_LINK.sub(r'\1', text)
+        text = RE_HTML_TAGS.sub('', text)
         
         # Нормализуем переносы строк
         text = text.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Убираем множественные пробелы
-        text = re.sub(r' +', ' ', text)
-        
-        # Убираем множественные переносы строк (оставляем максимум 2)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Убираем множественные пробелы и переносы
+        text = RE_MULTIPLE_SPACES.sub(' ', text)
+        text = RE_MULTIPLE_NEWLINES.sub('\n\n', text)
         
         # Убираем пробелы в начале и конце строк
         lines = [line.strip() for line in text.split('\n')]
         text = '\n'.join(lines)
         
-        # Убираем пробелы в начале и конце всего текста
-        text = text.strip()
-        
-        return text
+        return text.strip()
     
     def _create_quick_answer_card(self, answer: Dict):
         """Создать карточку краткой сводки с кнопкой копирования"""
@@ -514,7 +614,6 @@ class SearchPage(BasePage):
         }
         icon = icons.get(answer["type"], "💡")
         
-        # ИСПРАВЛЕНО: очищаем текст ответа
         clean_content = self._clean_text(answer.get("content", ""))
         
         # Карточка сводки
@@ -550,7 +649,7 @@ class SearchPage(BasePage):
             corner_radius=10
         ).pack(side="right", padx=(10, 0))
         
-        # Содержимое — используем CTkTextbox для возможности выделения и копирования
+        # Содержимое
         content_frame = ctk.CTkFrame(inner, fg_color="transparent")
         content_frame.pack(pady=15, padx=20, fill="x")
         
@@ -566,10 +665,9 @@ class SearchPage(BasePage):
         )
         content_text.pack(fill="x", expand=True)
         content_text.insert("1.0", clean_content)
-        content_text.configure(state="disabled")  # Только для чтения, но можно выделять
+        content_text.configure(state="disabled")
         
-        # ИСПРАВЛЕНО: сохраняем полный текст для копирования
-        # Для ИИ-ответа используем полный сохраненный ответ, для остальных — текущий контент
+        # Сохраняем полный текст для копирования
         if answer.get("type") == "ai" and hasattr(self, '_full_ai_answer'):
             full_text_to_copy = self._full_ai_answer
         else:
@@ -596,7 +694,6 @@ class SearchPage(BasePage):
             )
             action_btn.pack(side="left")
         
-        # ИСПРАВЛЕНО: кнопка копирования ответа — теперь копирует полный текст
         copy_btn = ctk.CTkButton(
             btn_frame,
             text="📋 Копировать ответ",
@@ -623,13 +720,12 @@ class SearchPage(BasePage):
             link_btn.pack(side="left", padx=(10, 0))
     
     def _copy_last_answer(self):
-        """ИСПРАВЛЕНО: Копирование полного ответа в буфер обмена"""
+        """Копирование полного ответа в буфер обмена"""
         if hasattr(self, '_last_answer_text') and self._last_answer_text:
             self.clipboard_clear()
             self.clipboard_append(self._last_answer_text)
             self.update()
             
-            # Показываем уведомление
             notif = ctk.CTkLabel(
                 self,
                 text="✓ Ответ скопирован!",
@@ -679,7 +775,7 @@ class SearchPage(BasePage):
             except:
                 pass
         
-        # Сниппет — ИСПРАВЛЕНО: очищаем текст
+        # Сниппет
         if link.get("content"):
             clean_snippet = self._clean_text(link["content"])
             ctk.CTkLabel(
@@ -730,12 +826,9 @@ class SearchPage(BasePage):
         if rtype in ["currency", "converter", "weather", "news"]:
             self.controller.show_page("home")
         elif rtype == "ai":
-            # ИСПРАВЛЕНО: проверяем, есть ли сохраненный полный ответ
             if hasattr(self, '_full_ai_answer') and self._full_ai_answer:
-                # Открываем большое окно с полным ответом
                 self._show_full_ai_response(self._last_ai_query, self._full_ai_answer)
             else:
-                # Fallback: используем текущий контент
                 self.ai_context = answer.get("content", "")
                 self.search_entry.delete(0, "end")
                 self.search_entry.focus()
@@ -809,7 +902,7 @@ class SearchPage(BasePage):
             return None
     
     def _search_currency(self, query_lower: str, original: str) -> Optional[Dict]:
-        """Поиск валют"""
+        """Поиск валют (из кэша)"""
         has_currency_keyword = any(kw in query_lower for kw in [
             "курс", "цена", "стоимость", "доллар", "евро", "биткоин", 
             "bitcoin", "usd", "eur", "btc", "рубль", "конверт"
@@ -864,7 +957,7 @@ class SearchPage(BasePage):
         return None
     
     def _get_currency_data(self) -> Dict:
-        """Получить данные валют"""
+        """Получить данные валют из кэша"""
         homepage = self._get_homepage_data()
         
         if homepage and hasattr(homepage, 'cache'):
@@ -980,7 +1073,7 @@ class SearchPage(BasePage):
         return None
     
     def _get_weather_data(self, city: str) -> Optional[Dict]:
-        """Получить данные погоды"""
+        """Получить данные погоды из кэша"""
         homepage = self._get_homepage_data()
         
         if homepage and hasattr(homepage, 'cache'):
@@ -1054,306 +1147,47 @@ class SearchPage(BasePage):
         except:
             return None
     
-    def _search_wikipedia(self, query: str) -> Optional[Dict]:
-        """Поиск в Wikipedia"""
-        driver = self._get_driver()
-        if not driver:
-            return None
-        
+    def _get_homepage_data(self):
+        """Получить данные с главной страницы через контроллер"""
         try:
-            # Формируем поисковый URL
-            search_term = query.replace(' ', '+')
-            if 'что такое' in query.lower():
-                search_term = query.lower().replace('что такое', '').strip().replace(' ', '+')
+            homepage = None
             
-            # Используем поиск Wikipedia
-            url = f"https://ru.wikipedia.org/w/index.php?search={search_term}&title=Служебная:Поиск&profile=default&fulltext=1"
+            if hasattr(self.controller, 'pages'):
+                homepage = self.controller.pages.get('home')
             
-            driver.get(url)
-            time.sleep(3)
+            if not homepage and hasattr(self.controller, 'frames'):
+                homepage = self.controller.frames.get('home')
             
-            from selenium.webdriver.common.by import By
+            if not homepage and hasattr(self.controller, 'home_page'):
+                homepage = self.controller.home_page
             
-            # Проверяем, есть ли результаты поиска
-            results = driver.find_elements(By.CSS_SELECTOR, "div.mw-search-result-heading a")
-            
-            if results:
-                # Берем первый результат
-                first_link = results[0].get_attribute('href')
-                driver.get(first_link)
-                time.sleep(2)
-            
-            # Получаем заголовок
-            try:
-                title_elem = driver.find_element(By.CSS_SELECTOR, "h1.firstHeading")
-                title = title_elem.text.strip()
-            except:
-                title = query
-            
-            # Получаем содержимое
-            try:
-                # Ищем первый значимый параграф
-                paragraphs = driver.find_elements(By.CSS_SELECTOR, "div.mw-parser-output > p")
-                snippet = ""
-                for p in paragraphs:
-                    text = p.text.strip()
-                    # Пропускаем пустые и короткие
-                    if len(text) > 100 and not text.startswith("("):
-                        snippet = text[:500]
-                        if len(snippet) > 490:
-                            snippet += "..."
+            if not homepage:
+                for attr_name in dir(self.controller):
+                    attr = getattr(self.controller, attr_name, None)
+                    if hasattr(attr, 'cache') and isinstance(attr.cache, dict) and 'weather' in attr.cache:
+                        homepage = attr
                         break
-                
-                if not snippet:
-                    return None
-                    
-            except:
-                return None
             
-            # Проверяем, что это не страница ошибки
-            if "не существует" in title.lower() or "ошибка" in title.lower():
-                return None
-            
-            return {
-                "type": "wiki",
-                "title": title,
-                "content": snippet,
-                "url": driver.current_url,
-                "action": "Открыть статью"
-            }
-            
+            return homepage
         except Exception as e:
-            print(f"[Search] Ошибка Wikipedia: {e}")
+            print(f"[Search] Ошибка получения HomePage: {e}")
             return None
-    
-    def _search_duckduckgo(self, query: str) -> List[Dict]:
-        """Поиск в DuckDuckGo"""
-        driver = self._get_driver()
-        if not driver:
-            return []
-        
-        results = []
-        
-        try:
-            # Используем HTML-версию DuckDuckGo (без JS)
-            search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-            
-            driver.get(search_url)
-            time.sleep(3)
-            
-            from selenium.webdriver.common.by import By
-            
-            # Ищем результаты
-            result_elements = driver.find_elements(By.CSS_SELECTOR, "div.result")
-            
-            for elem in result_elements[:5]:
-                try:
-                    # Заголовок и ссылка
-                    link_elem = elem.find_element(By.CSS_SELECTOR, "a.result__a")
-                    title = link_elem.text.strip()
-                    url = link_elem.get_attribute('href')
-                    
-                    # Пропускаем рекламу и пустые
-                    if not title or "реклама" in title.lower():
-                        continue
-                    
-                    # Описание
-                    try:
-                        snippet_elem = elem.find_element(By.CSS_SELECTOR, "a.result__snippet")
-                        snippet = snippet_elem.text.strip()[:200]
-                        if len(snippet) > 190:
-                            snippet += "..."
-                    except:
-                        snippet = "Нет описания"
-                    
-                    results.append({
-                        "type": "web",
-                        "title": title,
-                        "content": snippet,
-                        "url": url,
-                        "action": "Открыть"
-                    })
-                    
-                except Exception as e:
-                    print(f"[Search] Ошибка парсинга результата: {e}")
-                    continue
-            
-            # Если мало результатов, пробуем обычную версию
-            if len(results) < 2:
-                print("[Search] Мало результатов, пробуем основной DDG...")
-                
-                search_url = f"https://duckduckgo.com/?q={query.replace(' ', '+')}"
-                driver.get(search_url)
-                time.sleep(4)
-                
-                try:
-                    # Ждем загрузки
-                    from selenium.webdriver.support.ui import WebDriverWait
-                    from selenium.webdriver.support import expected_conditions as EC
-                    
-                    wait = WebDriverWait(driver, 10)
-                    
-                    # Пробуем разные селекторы
-                    selectors = [
-                        "[data-testid='result']",
-                        ".result",
-                        "article",
-                    ]
-                    
-                    result_elements = []
-                    for selector in selectors:
-                        try:
-                            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
-                            result_elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                            if result_elements:
-                                break
-                        except:
-                            continue
-                    
-                    for elem in result_elements[:5]:
-                        try:
-                            # Пробуем разные селекторы для заголовка
-                            title_selectors = [
-                                "[data-testid='result-title-a']",
-                                "h2 a",
-                                "a[href]"
-                            ]
-                            
-                            title = url = ""
-                            for sel in title_selectors:
-                                try:
-                                    title_elem = elem.find_element(By.CSS_SELECTOR, sel)
-                                    title = title_elem.text.strip()
-                                    url = title_elem.get_attribute('href')
-                                    if title and url:
-                                        break
-                                except:
-                                    continue
-                            
-                            if not title or not url:
-                                continue
-                            
-                            # Описание
-                            snippet = "Нет описания"
-                            snippet_selectors = [
-                                "[data-testid='result-snippet']",
-                                ".result__snippet",
-                                "p"
-                            ]
-                            
-                            for sel in snippet_selectors:
-                                try:
-                                    snippet_elem = elem.find_element(By.CSS_SELECTOR, sel)
-                                    snippet = snippet_elem.text.strip()[:200]
-                                    if len(snippet) > 190:
-                                        snippet += "..."
-                                    if len(snippet) > 20:
-                                        break
-                                except:
-                                    continue
-                            
-                            results.append({
-                                "type": "web",
-                                "title": title,
-                                "content": snippet,
-                                "url": url,
-                                "action": "Открыть"
-                            })
-                            
-                        except Exception as e:
-                            print(f"[Search] Ошибка парсинга: {e}")
-                            continue
-                            
-                except Exception as e:
-                    print(f"[Search] Ошибка основного DDG: {e}")
-        
-        except Exception as e:
-            print(f"[Search] Ошибка веб-поиска: {e}")
-        
-        print(f"[Search] Найдено {len(results)} веб-результатов")
-        return results
-    
-    def _query_openrouter(self, query: str, context: Optional[str] = None) -> Optional[Dict]:
-        """Запрос к OpenRouter API для произвольных вопросов"""
-        try:
-            import config
-            
-            # Проверяем, что используем OpenRouter и есть ключ
-            if config.USE_AI_PROVIDER != "openrouter" or not config.OPENROUTER_API_KEY:
-                print("[Search] OpenRouter не настроен")
-                return None
-            
-            # Формируем промпт
-            if context:
-                prompt = f"Коротко я ответил на вопрос:\n\"{context}\"\n\nТеперь пользователь уточняет: \"{query}\"\n\nОтвети на уточнение на русском языке, как продолжение предыдущего ответа. Будь полезным и информативным."
-            else:
-                prompt = f"Ответь кратко и точно на русском языке на вопрос: {query}. Будь полезным и информативным."
-            
-            # Запрос к OpenRouter API
-            headers = {
-                "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://quicktab.local",
-                "X-Title": "QuickTab"
-            }
-            
-            data = {
-                "model": config.OPENROUTER_MODEL,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if "choices" in result and len(result["choices"]) > 0:
-                    answer = result["choices"][0]["message"]["content"].strip()
-                    # ИСПРАВЛЕНО: сохраняем полный ответ, но НЕ показываем окно сразу
-                    self._full_ai_answer = answer
-                    self._last_ai_query = query
-                    
-                    return {
-                        "type": "ai",
-                        "title": "ИИ-ответ",
-                        "content": answer[:300] + "..." if len(answer) > 300 else answer,  # Краткая версия
-                        "action": "Показать полный ответ"  # Кнопка для открытия окна
-                    }
-            else:
-                print(f"[Search] Ошибка OpenRouter: {response.status_code} - {response.text}")
-                
-        except Exception as e:
-            print(f"[Search] Ошибка OpenRouter: {e}")
-            
-        return None
     
     def _show_full_ai_response(self, query: str, answer: str):
-        """УВЕЛИЧЕННОЕ диалоговое окно для полного ИИ-ответа"""
-        # Создаем большое диалоговое окно
+        """Увеличенное диалоговое окно для полного ИИ-ответа"""
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Ответ на: {query[:50]}{'...' if len(query) > 50 else ''}")
         
-        # УВЕЛИЧЕННЫЙ размер окна
         dialog.geometry("1400x900")
         dialog.minsize(1200, 800)
         dialog.transient(self)
         
-        # ИСПРАВЛЕНО: откладываем grab_set() пока окно не станет видимым
         def set_grab():
             try:
                 dialog.grab_set()
             except Exception as e:
                 print(f"[Search] grab_set failed: {e}")
         
-        # Центрируем окно
         dialog.update_idletasks()
         screen_width = dialog.winfo_screenwidth()
         screen_height = dialog.winfo_screenheight()
@@ -1361,7 +1195,7 @@ class SearchPage(BasePage):
         y = (screen_height - 900) // 2
         dialog.geometry(f"1400x900+{x}+{y}")
         
-        # Заголовок с УВЕЛИЧЕННЫМ шрифтом
+        # Заголовок
         header_frame = ctk.CTkFrame(dialog, fg_color="#2a2a2a")
         header_frame.pack(fill="x", padx=20, pady=20)
         
@@ -1380,13 +1214,13 @@ class SearchPage(BasePage):
             wraplength=1300
         ).pack(pady=(0, 10))
         
-        # Область текста с УВЕЛИЧЕННЫМ шрифтом
+        # Область текста
         content_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
         text_widget = ctk.CTkTextbox(
             content_frame,
-            font=("Arial", 22),
+            font=("Arial", 32),
             text_color="#FFFFFF",
             fg_color="#1a1a1a",
             corner_radius=15,
@@ -1395,16 +1229,14 @@ class SearchPage(BasePage):
         )
         text_widget.pack(fill="both", expand=True)
         
-        # Вставляем очищенный текст
         clean_answer = self._clean_text(answer)
         text_widget.insert("1.0", clean_answer)
         text_widget.configure(state="disabled")
         
-        # Кнопки действий с УВЕЛИЧЕННЫМИ шрифтами
+        # Кнопки действий
         btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_frame.pack(fill="x", padx=20, pady=20)
         
-        # Кнопка копирования
         copy_btn = ctk.CTkButton(
             btn_frame,
             text="📋 Копировать весь ответ",
@@ -1419,7 +1251,6 @@ class SearchPage(BasePage):
         )
         copy_btn.pack(side="left", padx=(0, 15))
         
-        # Кнопка закрытия
         close_btn = ctk.CTkButton(
             btn_frame,
             text="✓ Закрыть",
@@ -1433,7 +1264,6 @@ class SearchPage(BasePage):
         )
         close_btn.pack(side="left")
         
-        # Кнопка уточнения
         clarify_btn = ctk.CTkButton(
             btn_frame,
             text="💬 Уточнить",
@@ -1448,10 +1278,7 @@ class SearchPage(BasePage):
         )
         clarify_btn.pack(side="right")
         
-        # ИСПРАВЛЕНО: используем after() для grab_set() после отрисовки
         dialog.after(100, set_grab)
-        
-        # Фокус на окно
         dialog.focus_set()
         dialog.lift()
     
@@ -1461,11 +1288,10 @@ class SearchPage(BasePage):
         self.clipboard_append(text)
         self.update()
         
-        # Уведомление внутри диалога
         notif = ctk.CTkLabel(
             dialog or self,
             text="✓ Ответ скопирован!",
-            font=("Arial", 28, "bold"),  # УВЕЛИЧЕНО
+            font=("Arial", 28, "bold"),
             text_color="#00FF00",
             fg_color="#2a2a2a",
             corner_radius=15
@@ -1481,14 +1307,12 @@ class SearchPage(BasePage):
         if dialog:
             dialog.destroy()
         
-        # Сохраняем контекст
         self.ai_context = answer
         self.search_entry.delete(0, "end")
         self.search_entry.insert(0, f"Уточнение: ")
         self.search_entry.focus()
         self.search_entry.icursor("end")
         
-        # Показываем подсказку
         self.show_start_screen()
         hint_frame = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=15)
         hint_frame.pack(pady=20, fill="x", padx=5)
@@ -1496,15 +1320,15 @@ class SearchPage(BasePage):
         ctk.CTkLabel(
             hint_frame,
             text="💬 Режим уточнения",
-            font=("Arial", 30, "bold"),  # УВЕЛИЧЕНО
+            font=("Arial", 30, "bold"),
             text_color="#00FF00"
         ).pack(pady=10)
         
         ctk.CTkLabel(
             hint_frame,
             text=f"Предыдущий вопрос: {original_query[:60]}{'...' if len(original_query) > 60 else ''}\n"
-                 f"Введите дополнительный вопрос для уточнения",
-            font=("Arial", 22),  # УВЕЛИЧЕНО
+                f"Введите дополнительный вопрос для уточнения",
+            font=("Arial", 22),
             text_color="#AAAAAA"
         ).pack(pady=10)
         
