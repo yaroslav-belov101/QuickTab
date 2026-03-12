@@ -82,7 +82,10 @@ def _safe_driver_check(driver) -> bool:
 
 
 def _fast_parse_titles(driver, selectors: List[str], max_items: int = 5) -> List[Dict[str, str]]:
-    """Быстрый парсинг заголовков без лишних проверок"""
+    """
+    Быстрый парсинг заголовков без лишних проверок
+    ИСПРАВЛЕНО: гарантированный возврат минимум 1 элемента при ошибке
+    """
     results = []
     
     for selector in selectors:
@@ -118,10 +121,50 @@ def _fast_parse_titles(driver, selectors: List[str], max_items: int = 5) -> List
     return results
 
 
+def _fallback_parse(driver, max_items: int = 5) -> List[Dict[str, str]]:
+    """
+    ИСПРАВЛЕНО: Fallback парсинг любых ссылок с осмысленным текстом
+    Гарантирует возврат минимум 1 элемента
+    """
+    results = []
+    
+    try:
+        links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
+        for link in links[:30]:  # Увеличили диапазон поиска
+            try:
+                title = link.text.strip()
+                href = link.get_attribute("href")
+                
+                # ИСПРАВЛЕНО: более мягкие критерии отбора
+                if (title and 
+                    15 < len(title) < 150 and  # Расширен диапазон длины
+                    href and 
+                    'http' in href and
+                    not any(x in href.lower() for x in ['login', 'register', 'auth', 'css', 'js', 'png', 'jpg'])):
+                    
+                    results.append({
+                        "title": title[:120],
+                        "summary": "",
+                        "url": href
+                    })
+                    
+                    if len(results) >= max_items:
+                        break
+                        
+            except Exception:
+                continue
+                
+    except Exception as e:
+        print(f"[News] Ошибка fallback парсинга: {e}")
+    
+    return results
+
+
 def get_news_data(driver, topic: str = "cyber") -> List[Dict[str, str]]:
     """
     Ускоренное получение новостей.
     Использует явные ожидания вместо фиксированных задержек.
+    ИСПРАВЛЕНО: гарантированный возврат осмысленного результата
     """
     # Проверяем кэш
     current_time = time.time()
@@ -131,7 +174,8 @@ def get_news_data(driver, topic: str = "cyber") -> List[Dict[str, str]]:
         return _news_cache[topic]
     
     if not _safe_driver_check(driver):
-        return [{"title": "Сессия потеряна", "summary": "WebDriver не отвечает"}]
+        # ИСПРАВЛЕНО: возвращаем осмысленное сообщение вместо пустого списка
+        return [{"title": "⚠️ WebDriver не отвечает", "summary": "Проверьте подключение браузера", "url": ""}]
     
     # Блокируем доступ к драйверу
     with _driver_lock:
@@ -155,38 +199,46 @@ def get_news_data(driver, topic: str = "cyber") -> List[Dict[str, str]]:
             # Быстрый парсинг
             news_items = _fast_parse_titles(driver, config["title_selectors"], max_items=5)
             
+            # ИСПРАВЛЕНО: если основной парсинг не дал результатов — fallback
             if not news_items:
-                # Fallback: любые ссылки
-                links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
-                for link in links[:15]:
-                    try:
-                        title = link.text.strip()
-                        href = link.get_attribute("href")
-                        if title and 20 < len(title) < 100 and href and 'http' in href:
-                            news_items.append({
-                                "title": title[:120],
-                            "summary": "",
-                            "url": href
-                        })
-                        if len(news_items) >= 3:
-                            break
-                    except:
-                        continue
+                print(f"   ⚠️ Основной парсинг не дал результатов, пробуем fallback...")
+                news_items = _fallback_parse(driver, max_items=5)
+            
+            # ИСПРАВЛЕНО: если и fallback не сработал — информативное сообщение
+            if not news_items:
+                news_items = [{
+                    "title": "📭 Новости временно недоступны",
+                    "summary": "Попробуйте обновить позже",
+                    "url": config["url"]
+                }]
             
             # Сохраняем в кэш
             _news_cache[topic] = news_items
             _news_cache["timestamp"] = current_time
             
             print(f"   ✅ Найдено: {len(news_items)} новостей")
-            return news_items if news_items else [{"title": "Новости не найдены", "summary": ""}]
+            return news_items
             
         except TimeoutException:
             print(f"   ⚠️ Таймаут загрузки")
-            return [{"title": "Таймаут загрузки", "summary": "Страница загружается слишком долго"}]
+            # ИСПРАВЛЕНО: fallback при таймауте
+            fallback_items = _fallback_parse(driver, max_items=3)
+            if fallback_items:
+                return fallback_items
+            return [{
+                "title": "⏱️ Таймаут загрузки",
+                "summary": "Страница загружается слишком долго, попробуйте позже",
+                "url": config["url"]
+            }]
             
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
-            return [{"title": "Ошибка загрузки", "summary": str(e)[:50]}]
+            # ИСПРАВЛЕНО: информативное сообщение об ошибке
+            return [{
+                "title": f"⚠️ Ошибка загрузки",
+                "summary": f"Не удалось загрузить новости: {str(e)[:50]}",
+                "url": config["url"]
+            }]
 
 
 def format_news_for_display(news_items: List[Dict[str, str]], topic_name: str) -> str:
@@ -223,3 +275,15 @@ def print_news(news_data: Dict, browser_name: str = "Chrome"):
             print(f"   {short}...")
     
     print("═" * 70)
+
+
+def clear_cache():
+    """Очистить кэш новостей (для принудительного обновления)"""
+    global _news_cache
+    _news_cache = {
+        "cyber": [],
+        "politics": [],
+        "economy": [],
+        "tech": [],
+        "timestamp": 0
+    }

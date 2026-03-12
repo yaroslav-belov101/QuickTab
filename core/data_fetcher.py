@@ -80,18 +80,18 @@ class DataFetcher:
         data = get_news_data(self.driver, topic)
         return format_news_for_display(data, topic_name)
     
-def fetch_parallel(self, modules: list) -> str:
-    """Параллельная загрузка всех модулей"""
-    results = []
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_module = {
-            executor.submit(self.fetch, m): m for m in modules
-        }
-        for future in concurrent.futures.as_completed(future_to_module):
-            try:
-                results.append(future.result())
-            except Exception as e:
-                results.append(f"Ошибка: {e}")
-    
-    return "".join(results)
+    def fetch_parallel(self, modules: list) -> str:
+        """Параллельная загрузка всех модулей"""
+        results = []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_module = {
+                executor.submit(self.fetch, m): m for m in modules
+            }
+            for future in concurrent.futures.as_completed(future_to_module):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    results.append(f"Ошибка: {e}")
+        
+        return "".join(results)

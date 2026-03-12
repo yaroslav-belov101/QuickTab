@@ -1,8 +1,0 @@
-# QuickTab - requirements.txt
-# ===============================
-customtkinter==5.2.2          # Современный GUI
-selenium==4.15.2              # Автоматизация браузера для парсинга
-webdriver-manager==4.0.1      # Автоматическое управление ChromeDriver
-beautifulsoup4==4.14.3        # Парсинг HTML (резервная копия)
-requests==2.32.5              # HTTP запросы
-google-generativeai>=0.8.0

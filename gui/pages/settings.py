@@ -764,48 +764,6 @@ class SettingsPage(BasePage):
         
         return errors
     
-    def save_settings(self):
-        """Сохранение настроек с валидацией и применением"""
-        # Собираем данные из UI
-        new_settings = self.collect_settings_from_ui()
-        
-        # Валидация
-        errors = self.validate_settings(new_settings)
-        if errors:
-            self.show_status(f"❌ Ошибка: {errors[0]}", error=True)
-            return
-        
-        # Сохраняем
-        self.settings = new_settings
-        if self.save_settings_to_file():
-            self.show_status("✅ Настройки сохранены!", success=True)
-            
-            # Применяем критические настройки сразу
-            self.apply_critical_settings()
-            
-            # Уведомляем другие компоненты
-            self.notify_settings_changed()
-        else:
-            self.show_status("❌ Ошибка сохранения файла", error=True)
-    
-    def validate_settings(self, settings: Dict[str, Any]) -> list[str]:
-        """Валидация настроек"""
-        errors = []
-        
-        # Проверка города
-        if len(settings["default_city"]) < 2:
-            errors.append("Название города слишком короткое")
-        
-        # Проверка User-Agent (если указан)
-        if settings["user_agent"] and len(settings["user_agent"]) < 10:
-            errors.append("User-Agent слишком короткий")
-        
-        # Проверка интервала
-        if not (1 <= settings["auto_update_interval"] <= 60):
-            errors.append("Интервал должен быть от 1 до 60 минут")
-        
-        return errors
-    
     def apply_critical_settings(self):
         """Применение критических настроек, требующих перезагрузки/переконфигурации"""
         # Тема

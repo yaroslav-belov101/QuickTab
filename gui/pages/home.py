@@ -4,6 +4,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import threading
 import concurrent.futures
+import json
+import os
+import webbrowser
 from .base_page import BasePage
 
 # Глобальные переменные для модулей (ленивый импорт)
@@ -57,7 +60,12 @@ class HomePage(BasePage):
         self.request_count = 0
         self.current_news_topic = "cyber"
         self.is_loading = False
-        self._driver_lock = threading.Lock()  # Блокировка для драйвера
+        # ИСПРАВЛЕНО: используем threading.Lock для всех операций с драйвером
+        self._driver_lock = threading.Lock()
+        
+        # Данные избранного
+        self.favorites_data = []
+        self.fav_cards = []
         
         super().__init__(parent, controller)
         
@@ -314,41 +322,480 @@ class HomePage(BasePage):
         }
     
     def _create_favorites_section(self):
-        """Избранное — 5 полей"""
+        """Избранное в виде красивых карточек с пользовательскими сайтами"""
         fav_frame = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-        fav_frame.pack(fill="x", pady=10)
+        fav_frame.pack(fill="x", pady=15)
         
-        ctk.CTkLabel(fav_frame, text="⭐ Избранное",
-                    font=("Arial", 24, "bold"), text_color="white").pack(anchor="w")
+        # Заголовок с кнопкой добавления
+        header = ctk.CTkFrame(fav_frame, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 15))
         
-        self.fav_container = ctk.CTkFrame(fav_frame, fg_color="#2A2A2A", corner_radius=15)
-        self.fav_container.pack(fill="x", pady=10)
-        
-        # 5 полей избранного
-        self.fav_items = []
-        for i in range(5):
-            fav_item = ctk.CTkFrame(self.fav_container, fg_color="#3A3A3A", corner_radius=10, height=50)
-            fav_item.pack(fill="x", padx=10, pady=4)
-            fav_item.pack_propagate(False)
-            
-            label = ctk.CTkLabel(fav_item, 
-                       text="Пусто",
-                       font=("Arial", 16), text_color="#666666")
-            label.pack(side="left", padx=10, pady=10)
-            
-            delete_btn = ctk.CTkButton(fav_item, text="×", width=30,
-                        fg_color="transparent", hover_color="#FF5252",
-                        command=lambda f=fav_item: f.destroy())
-            delete_btn.pack(side="right", padx=10)
-            
-            self.fav_items.append({"frame": fav_item, "label": label, "delete_btn": delete_btn})
+        ctk.CTkLabel(
+            header, 
+            text="⭐ Избранное",
+            font=("Arial", 28, "bold"), 
+            text_color="white"
+        ).pack(side="left")
         
         add_btn = ctk.CTkButton(
-            fav_frame, text="+ Добавить", command=self._add_favorite,
-            fg_color="#00AAFF", hover_color="#0088DD",
-            height=45, corner_radius=22, font=("Arial", 16, "bold")
+            header,
+            text="+ Добавить сайт",
+            command=self._show_add_favorite_dialog,
+            fg_color="#00AAFF",
+            hover_color="#0088DD",
+            width=150,
+            height=35,
+            corner_radius=17,
+            font=("Arial", 14, "bold")
         )
-        add_btn.pack(pady=5)
+        add_btn.pack(side="right")
+        
+        # Сетка карточек (максимум 6 штук, 3 в ряд)
+        self.fav_container = ctk.CTkFrame(fav_frame, fg_color="transparent")
+        self.fav_container.pack(fill="x")
+        self.fav_container.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        # Загружаем сохраненные избранные
+        self._load_favorites()
+        
+        # Если пусто — создаем пустые слоты
+        if not self.favorites_data:
+            for i in range(6):
+                self._create_empty_fav_slot(i)
+    
+    def _create_empty_fav_slot(self, index: int):
+        """Создает пустой слот для избранного"""
+        row = index // 3
+        col = index % 3
+        
+        # Пустая карточка с приглашением
+        card = ctk.CTkFrame(
+            self.fav_container,
+            fg_color="#2A2A2A",
+            corner_radius=20,
+            border_width=2,
+            border_color="#3A3A3A",
+            height=120
+        )
+        card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+        card.pack_propagate(False)
+        
+        # Приглашение добавить
+        plus_label = ctk.CTkLabel(
+            card,
+            text="+",
+            font=("Arial", 48),
+            text_color="#555555"
+        )
+        plus_label.place(relx=0.5, rely=0.4, anchor="center")
+        
+        hint_label = ctk.CTkLabel(
+            card,
+            text="Добавить сайт",
+            font=("Arial", 14),
+            text_color="#666666"
+        )
+        hint_label.place(relx=0.5, rely=0.75, anchor="center")
+        
+        # Клик по карточке открывает диалог
+        card.bind("<Button-1>", lambda e: self._show_add_favorite_dialog())
+        plus_label.bind("<Button-1>", lambda e: self._show_add_favorite_dialog())
+        hint_label.bind("<Button-1>", lambda e: self._show_add_favorite_dialog())
+        
+        # Hover эффект
+        def on_enter(e):
+            card.configure(border_color="#00AAFF", fg_color="#333333")
+            plus_label.configure(text_color="#00AAFF")
+        
+        def on_leave(e):
+            card.configure(border_color="#3A3A3A", fg_color="#2A2A2A")
+            plus_label.configure(text_color="#555555")
+        
+        for widget in [card, plus_label, hint_label]:
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+        
+        self.fav_cards.append({
+            "frame": card,
+            "type": "empty",
+            "index": index
+        })
+    
+    def _create_fav_card(self, index: int, data: dict):
+        """Создает заполненную карточку сайта"""
+        row = index // 3
+        col = index % 3
+        
+        # Удаляем старую карточку если есть
+        if index < len(self.fav_cards):
+            self.fav_cards[index]["frame"].destroy()
+        
+        # Цвета для категорий
+        category_colors = {
+            "social": "#FF6B6B",
+            "news": "#4ECDC4",
+            "video": "#FF6B9D",
+            "work": "#45B7D1",
+            "shop": "#96CEB4",
+            "other": "#FECA57"
+        }
+        color = category_colors.get(data.get("category", "other"), "#FECA57")
+        
+        # Карточка с цветным акцентом
+        card = ctk.CTkFrame(
+            self.fav_container,
+            fg_color="#2A2A2A",
+            corner_radius=20,
+            border_width=3,
+            border_color=color,
+            height=120
+        )
+        card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
+        card.pack_propagate(False)
+        
+        # Внутренний контейнер
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=15, pady=12)
+        
+        # Иконка (emoji или первая буква)
+        icon_text = data.get("icon", "")
+        if not icon_text:
+            icon_text = data.get("title", "S")[0].upper()
+        
+        icon_frame = ctk.CTkFrame(
+            inner,
+            fg_color=color,
+            corner_radius=12,
+            width=50,
+            height=50
+        )
+        icon_frame.pack(side="left", padx=(0, 15))
+        icon_frame.pack_propagate(False)
+        
+        icon_label = ctk.CTkLabel(
+            icon_frame,
+            text=icon_text,
+            font=("Arial", 24),
+            text_color="white"
+        )
+        icon_label.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Текстовая часть
+        text_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        text_frame.pack(side="left", fill="both", expand=True)
+        
+        title = ctk.CTkLabel(
+            text_frame,
+            text=data.get("title", "Без названия"),
+            font=("Arial", 18, "bold"),
+            text_color="white",
+            anchor="w"
+        )
+        title.pack(fill="x")
+        
+        url_short = data.get("url", "").replace("https://", "").replace("http://", "")[:25]
+        if len(url_short) > 25:
+            url_short += "..."
+        
+        url_label = ctk.CTkLabel(
+            text_frame,
+            text=url_short,
+            font=("Arial", 12),
+            text_color="#888888",
+            anchor="w"
+        )
+        url_label.pack(fill="x")
+        
+        # Кнопки действий (в правом верхнем углу карточки)
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.place(relx=0.98, rely=0.05, anchor="ne")
+        
+        # Кнопка открытия
+        open_btn = ctk.CTkButton(
+            btn_frame,
+            text="↗",
+            width=45,
+            height=45,
+            corner_radius=22,
+            fg_color="#3A3A3A",
+            hover_color=color,
+            text_color="white",
+            font=("Arial", 24, "bold"),
+            command=lambda: self._open_favorite(index)
+        )
+        open_btn.pack(pady=2)
+        
+        # Кнопка редактирования
+        edit_btn = ctk.CTkButton(
+            btn_frame,
+            text="✎",
+            width=45,
+            height=45,
+            corner_radius=22,
+            fg_color="#3A3A3A",
+            hover_color="#FFA500",
+            text_color="white",
+            font=("Arial", 20),
+            command=lambda: self._edit_favorite(index)
+        )
+        edit_btn.pack(pady=2)
+        
+        # Кнопка удаления
+        delete_btn = ctk.CTkButton(
+            btn_frame,
+            text="🗑",
+            width=45,
+            height=45,
+            corner_radius=22,
+            fg_color="#3A3A3A",
+            hover_color="#FF5252",
+            text_color="white",
+            font=("Arial", 20),
+            command=lambda: self._remove_favorite(index)
+        )
+        delete_btn.pack(pady=2)
+        
+        # Hover эффекты для карточки
+        def on_enter(e):
+            card.configure(fg_color="#333333", border_width=4)
+            open_btn.configure(text_color="white")
+            edit_btn.configure(text_color="white")
+            delete_btn.configure(text_color="white")
+        
+        def on_leave(e):
+            card.configure(fg_color="#2A2A2A", border_width=3)
+            open_btn.configure(text_color="transparent")
+            edit_btn.configure(text_color="transparent")
+            delete_btn.configure(text_color="transparent")
+        
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
+        
+        # Клик по карточке открывает сайт
+        card.bind("<Button-1>", lambda e: self._open_favorite(index))
+        inner.bind("<Button-1>", lambda e: self._open_favorite(index))
+        text_frame.bind("<Button-1>", lambda e: self._open_favorite(index))
+        
+        # Обновляем данные
+        self.fav_cards[index] = {
+            "frame": card,
+            "type": "filled",
+            "data": data,
+            "index": index
+        }
+    
+    def _show_add_favorite_dialog(self, edit_index: int = None):
+        """Диалог добавления/редактирования избранного"""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Добавить сайт" if edit_index is None else "Редактировать сайт")
+        dialog.geometry("1600x1100")
+        dialog.transient(self)
+        self.after(100, dialog.grab_set)
+        
+        # Заголовок
+        ctk.CTkLabel(
+            dialog,
+            text="🌐 Добавить в избранное" if edit_index is None else "✎ Редактировать",
+            font=("Arial", 36, "bold")
+        ).pack(pady=40)
+        
+        # Поля ввода
+        form_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        form_frame.pack(fill="x", padx=60, pady=20)
+        
+        # Название
+        ctk.CTkLabel(form_frame, text="Название:", font=("Arial", 24), anchor="w").pack(fill="x", pady=(20, 10))
+        title_entry = ctk.CTkEntry(form_frame, height=70, font=("Arial", 24), placeholder_text="Например: YouTube")
+        title_entry.pack(fill="x")
+        
+        # URL
+        ctk.CTkLabel(form_frame, text="URL:", font=("Arial", 24), anchor="w").pack(fill="x", pady=(30, 10))
+        url_entry = ctk.CTkEntry(form_frame, height=70, font=("Arial", 24), placeholder_text="https://...")
+        url_entry.pack(fill="x")
+        
+        # Иконка (emoji) - НЕОБЯЗАТЕЛЬНОЕ ПОЛЕ
+        ctk.CTkLabel(form_frame, text="Иконка (emoji) — необязательно:", font=("Arial", 24), anchor="w").pack(fill="x", pady=(30, 10))
+        icon_entry = ctk.CTkEntry(form_frame, height=70, font=("Arial", 24), placeholder_text="Оставьте пустым для автоматической иконки")
+        icon_entry.pack(fill="x")
+        
+        # Категория (цвет)
+        ctk.CTkLabel(form_frame, text="Категория:", font=("Arial", 24), anchor="w").pack(fill="x", pady=(30, 15))
+        
+        category_var = ctk.StringVar(value="other")
+        categories = [
+            ("Соцсети", "social", "#FF6B6B"),
+            ("Новости", "news", "#4ECDC4"),
+            ("Видео", "video", "#FF6B9D"),
+            ("Работа", "work", "#45B7D1"),
+            ("Покупки", "shop", "#96CEB4"),
+            ("Другое", "other", "#FECA57")
+        ]
+        
+        cat_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
+        cat_frame.pack(fill="x", pady=10)
+        
+        for text, value, color in categories:
+            rb = ctk.CTkRadioButton(
+                cat_frame,
+                text=text,
+                variable=category_var,
+                value=value,
+                font=("Arial", 22),
+                radiobutton_width=35,
+                radiobutton_height=35,
+                border_color=color,
+                fg_color=color
+            )
+            rb.pack(anchor="w", pady=6)
+        
+        # Если редактирование — заполняем поля
+        if edit_index is not None and edit_index < len(self.favorites_data):
+            old_data = self.favorites_data[edit_index]
+            title_entry.insert(0, old_data.get("title", ""))
+            url_entry.insert(0, old_data.get("url", ""))
+            icon_entry.insert(0, old_data.get("icon", ""))
+            category_var.set(old_data.get("category", "other"))
+        
+        # Одна большая кнопка Готово
+        def save():
+            title = title_entry.get().strip()
+            url = url_entry.get().strip()
+            icon = icon_entry.get().strip()
+            category = category_var.get()
+            
+            if not title or not url:
+                messagebox.showerror("Ошибка", "Заполните название и URL!")
+                return
+            
+            if not icon:
+                icon = title[0].upper() if title else "🌐"
+            
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
+            
+            data = {
+                "title": title,
+                "url": url,
+                "icon": icon,
+                "category": category
+            }
+            
+            if edit_index is not None:
+                self.favorites_data[edit_index] = data
+                self._create_fav_card(edit_index, data)
+            else:
+                added = False
+                for i, card in enumerate(self.fav_cards):
+                    if card["type"] == "empty":
+                        self.favorites_data.append(data)
+                        self._create_fav_card(i, data)
+                        added = True
+                        break
+                
+                if not added:
+                    messagebox.showwarning("Место закончилось", "Максимум 6 избранных сайтов!")
+                    return
+            
+            self._save_favorites()
+            dialog.destroy()
+        
+        ctk.CTkButton(
+            dialog,
+            text="✓ Готово",
+            command=save,
+            fg_color="#00AAFF",
+            hover_color="#0088DD",
+            height=80,
+            corner_radius=20,
+            font=("Arial", 28, "bold")
+        ).pack(fill="x", padx=60, pady=40)
+    
+    def _open_favorite(self, index: int):
+        """Открыть сайт в браузере с активацией окна"""
+        if index < len(self.fav_cards) and self.fav_cards[index]["type"] == "filled":
+            url = self.fav_cards[index]["data"].get("url")
+            if url:
+                import subprocess
+                import platform
+                
+                system = platform.system()
+                try:
+                    if system == "Linux":
+                        subprocess.Popen(["xdg-open", url], 
+                                    stdout=subprocess.DEVNULL, 
+                                    stderr=subprocess.DEVNULL)
+                    elif system == "Darwin":  # macOS
+                        subprocess.Popen(["open", url])
+                    elif system == "Windows":
+                        os.startfile(url)
+                    else:
+                        import webbrowser
+                        webbrowser.open(url, new=2)
+                    
+                    self.controller.update_status(f"Открыт: {url}", "#00AAFF")
+                except Exception as e:
+                    print(f"Ошибка открытия браузера: {e}")
+                    # Fallback
+                    import webbrowser
+                    webbrowser.open(url, new=2)
+    
+    def _edit_favorite(self, index: int):
+        """Редактировать избранное"""
+        self._show_add_favorite_dialog(edit_index=index)
+    
+    def _remove_favorite(self, index: int):
+        """Удалить из избранного"""
+        if messagebox.askyesno("Удалить", "Удалить этот сайт из избранного?"):
+            # Удаляем из данных
+            if index < len(self.favorites_data):
+                self.favorites_data.pop(index)
+            
+            # Полностью пересоздаем сетку
+            for card in self.fav_cards:
+                card["frame"].destroy()
+            self.fav_cards = []
+            
+            # Пересоздаем все карточки заново
+            for i in range(6):
+                if i < len(self.favorites_data):
+                    self._create_fav_card(i, self.favorites_data[i])
+                else:
+                    self._create_empty_fav_slot(i)
+            
+            self._save_favorites()
+            self.controller.update_status("Удалено из избранного", "#FF5252")
+        
+    def _save_favorites(self):
+        """Сохранить избранное в файл"""
+        try:
+            config_dir = os.path.join(os.path.expanduser("~"), ".quicktab")
+            os.makedirs(config_dir, exist_ok=True)
+            
+            with open(os.path.join(config_dir, "favorites.json"), "w", encoding="utf-8") as f:
+                json.dump(self.favorites_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Ошибка сохранения избранного: {e}")
+    
+    def _load_favorites(self):
+        """Загрузить избранное из файла"""
+        try:
+            config_path = os.path.join(os.path.expanduser("~"), ".quicktab", "favorites.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    self.favorites_data = json.load(f)
+                    
+                # Создаем карточки для загруженных данных
+                for i, data in enumerate(self.favorites_data[:6]):
+                    self._create_fav_card(i, data)
+                
+                # Создаем пустые слоты для оставшихся
+                for i in range(len(self.favorites_data), 6):
+                    self._create_empty_fav_slot(i)
+            else:
+                self.favorites_data = []
+        except Exception as e:
+            print(f"Ошибка загрузки избранного: {e}")
+            self.favorites_data = []
     
     def _create_history_section(self):
         """История запросов — 5 полей"""
@@ -397,18 +844,14 @@ class HomePage(BasePage):
         self.controller.update_status("Загрузка...", "#FFFF00")
         
         def load_all():
-            # Запускаем все задачи сразу, каждая обновляет UI самостоятельно
             with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                # Валюты — с блокировкой драйвера
                 future_currency = executor.submit(self._fetch_currency)
-                # Остальное — параллельно
                 future_weather = executor.submit(self._fetch_weather)
                 future_cyber = executor.submit(self._fetch_news, "cyber")
                 future_politics = executor.submit(self._fetch_news, "politics")
                 future_economy = executor.submit(self._fetch_news, "economy")
                 future_tech = executor.submit(self._fetch_news, "tech")
                 
-                # Обрабатываем результаты по мере готовности
                 futures = {
                     future_currency: "currency",
                     future_weather: "weather",
@@ -423,7 +866,6 @@ class HomePage(BasePage):
                     try:
                         result = future.result()
                         if result:
-                            # Мгновенное обновление UI в главном потоке
                             if task == "weather":
                                 self.after(0, lambda r=result: self._update_weather_ui(r))
                             elif task == "currency":
@@ -442,7 +884,9 @@ class HomePage(BasePage):
         """Получение погоды через API"""
         try:
             get_weather_data = _get_weather_module()
-            data = get_weather_data(None, self.cache["weather"]["city"])
+            # ИСПРАВЛЕНО: используем _driver_lock для консистентности
+            with self._driver_lock:
+                data = get_weather_data(None, self.cache["weather"]["city"])
             self.cache["weather"]["data"] = data
             print(f"[Weather] Получено: {data.get('temp', 'N/A')}")
             return data
@@ -460,7 +904,6 @@ class HomePage(BasePage):
                 print("[Currency] Драйвер не доступен")
                 return None
             
-            # Блокируем драйвер только для этой операции
             with self._driver_lock:
                 data = get_currency_data(driver)
             
@@ -472,11 +915,15 @@ class HomePage(BasePage):
             return None
     
     def _fetch_news(self, topic: str) -> Optional[Dict]:
-        """Получение новостей"""
+        """Получение новостей — с блокировкой драйвера"""
         try:
             get_news_data = _get_news_module()
             driver = getattr(self.controller, 'driver', None)
-            items = get_news_data(driver, topic)
+            
+            # ИСПРАВЛЕНО: добавлена блокировка драйвера для консистентности
+            with self._driver_lock:
+                items = get_news_data(driver, topic)
+            
             self.cache["news"][topic]["data"] = items
             print(f"[News {topic}] Получено: {len(items)} новостей")
             return {"topic": topic, "items": items}
@@ -495,7 +942,6 @@ class HomePage(BasePage):
         self.weather_humidity.configure(text=f"💧 {data.get('humidity', '--%')}")
         self.weather_city.configure(text=f"📍 {data.get('city', 'Белореченск')}")
         
-        # Иконка по погоде
         desc = data.get("desc", "").lower()
         icon = "🌤️"
         if "дождь" in desc or "морось" in desc: icon = "🌧️"
@@ -508,6 +954,11 @@ class HomePage(BasePage):
     def _update_currency_ui(self, data: dict):
         """Обновить валюты"""
         print(f"[UI] Обновление валют: {data}")
+        # ИСПРАВЛЕНО: добавлена проверка на None перед isinstance
+        if data is None:
+            print(f"[UI] Ошибка: данные валют отсутствуют (None)")
+            return
+        
         if not isinstance(data, dict):
             print(f"[UI] Ошибка: данные валют не являются словарем: {type(data)}")
             return
@@ -525,23 +976,19 @@ class HomePage(BasePage):
                  "economy": "#00C853", "tech": "#FF9100"}
         color = colors.get(topic, "gray")
         
-        # Очищаем только если это текущая тема
         if topic != self.current_news_topic:
             return
         
-        # Очищаем
         for widget in self.news_items_widgets:
             widget["title"].configure(text="")
             widget["time"].configure(text="")
             widget["indicator"].configure(fg_color="gray")
             widget["url"] = None
         
-        # Заполняем (до 5 новостей)
         for i, item in enumerate(items[:5]):
             if i < len(self.news_items_widgets):
                 widget = self.news_items_widgets[i]
                 title = item.get("title", "")
-                # Обрезаем длинные заголовки
                 if len(title) > 100:
                     title = title[:97] + "..."
                 widget["title"].configure(text=title)
@@ -556,7 +1003,6 @@ class HomePage(BasePage):
         self.current_news_topic = topic
         self.news_topic_var.set(topic)
         
-        # Обновляем стили кнопок
         for t in ["cyber", "politics", "economy", "tech"]:
             btn = getattr(self, f"news_btn_{t}", None)
             if btn:
@@ -565,7 +1011,6 @@ class HomePage(BasePage):
                 else:
                     btn.configure(fg_color="transparent", text_color="#888888")
         
-        # Показываем из кэша
         cached = self.cache["news"][topic]["data"]
         if cached:
             self._update_news_ui(cached, topic)
@@ -588,7 +1033,6 @@ class HomePage(BasePage):
         self.request_count += 1
         now = datetime.now().strftime("%H:%M")
         
-        # История — 5 полей
         for i in range(len(self.history_items) - 1, 0, -1):
             self.history_items[i]["time"].configure(
                 text=self.history_items[i-1]["time"].cget("text"))
@@ -604,26 +1048,26 @@ class HomePage(BasePage):
     def _change_city(self):
         """Сменить город"""
         dialog = ctk.CTkInputDialog(text="Введите город:", title="Смена города")
-        dialog.geometry("900x450")  # Увеличено в 3 раза
+        dialog.geometry("900x450")
         
-        # Увеличиваем все элементы пропорционально
-        dialog.update()  # Обновляем диалог перед изменением виджетов
+        dialog.update()
         
         def scale_widgets(widget):
             for child in widget.winfo_children():
                 if isinstance(child, ctk.CTkLabel):
-                    child.configure(font=("Arial", 48, "bold"))  # Увеличенный шрифт
+                    child.configure(font=("Arial", 48, "bold"))
                 elif isinstance(child, ctk.CTkEntry):
                     child.configure(height=90, font=("Arial", 42))
                 elif isinstance(child, ctk.CTkButton):
                     child.configure(height=90, font=("Arial", 42))
-                scale_widgets(child)  # Рекурсивно
+                scale_widgets(child)
         
         scale_widgets(dialog)
         
         city = dialog.get_input()
-        if city:
-            self.cache["weather"]["city"] = city
+        # ИСПРАВЛЕНО: проверка на None и пустую строку
+        if city and city.strip():
+            self.cache["weather"]["city"] = city.strip()
             threading.Thread(target=self._load_data_async, daemon=True).start()
     
     def _open_news(self, index: int):
@@ -631,18 +1075,4 @@ class HomePage(BasePage):
         if index < len(self.news_items_widgets):
             url = self.news_items_widgets[index].get("url")
             if url and url.startswith("http"):
-                import webbrowser
                 webbrowser.open(url)
-    
-    def _add_favorite(self):
-        """Добавить в избранное — заполняем первое пустое поле"""
-        weather_data = self.cache["weather"].get("data")
-        if weather_data:
-            # Ищем первое пустое поле
-            for fav in self.fav_items:
-                if fav["label"].cget("text") == "Пусто":
-                    fav["label"].configure(
-                        text=f"🌤️ {weather_data.get('city', '')}: {weather_data.get('temp', '')}",
-                        text_color="white"
-                    )
-                    return

@@ -114,10 +114,23 @@ def _parse_rates_fast(driver) -> Dict[str, str]:
     return {"USD": usd, "EUR": eur}
 
 
-def _parse_btc_price(driver) -> str:
-    """Парсинг цены BTC/USD с CoinMarketCap"""
+def _parse_btc_price(driver, original_url: str = None) -> str:
+    """
+    Парсинг цены BTC/USD с CoinMarketCap
+    ИСПРАВЛЕНО: возврат к исходной странице после парсинга
+    """
+    btc_price = "Нет данных"
+    
     try:
         print(f"   Загрузка BTC с {BTC_URL}")
+        
+        # Сохраняем текущий URL для возврата
+        if original_url is None:
+            try:
+                original_url = driver.current_url
+            except:
+                original_url = CBR_URL
+        
         driver.get(BTC_URL)
         print("   Страница BTC загружена")
         wait = WebDriverWait(driver, 15)
@@ -140,25 +153,43 @@ def _parse_btc_price(driver) -> str:
                     clean_price = ''.join(c for c in price_text if c.isdigit() or c == '.' or c == ',')
                     if clean_price:
                         print(f"   BTC цена: {clean_price}")
-                        return f"{clean_price} USD"
+                        btc_price = f"{clean_price} USD"
+                        break
             except Exception as e:
                 print(f"   Селектор {selector} не найден: {e}")
                 continue
         
         # Fallback: найти любой элемент с большой ценой
-        print("   Поиск любой цены BTC")
-        elements = driver.find_elements(By.XPATH, "//*[string-length(text()) > 5 and contains(text(), '.') and number(substring-before(text(), '.')) > 1000]")
-        for elem in elements[:5]:
-            text = elem.text.strip()
-            print(f"   Элемент с ценой: {text}")
-            clean_price = ''.join(c for c in text if c.isdigit() or c == '.' or c == ',')
-            if len(clean_price) > 4:
-                print(f"   BTC цена найдена: {clean_price}")
-                return f"{clean_price} USD"
+        if btc_price == "Нет данных":
+            print("   Поиск любой цены BTC")
+            elements = driver.find_elements(By.XPATH, "//*[string-length(text()) > 5 and contains(text(), '.') and number(substring-before(text(), '.')) > 1000]")
+            for elem in elements[:5]:
+                text = elem.text.strip()
+                print(f"   Элемент с ценой: {text}")
+                clean_price = ''.join(c for c in text if c.isdigit() or c == '.' or c == ',')
+                if len(clean_price) > 4:
+                    print(f"   BTC цена найдена: {clean_price}")
+                    btc_price = f"{clean_price} USD"
+                    break
         
-        return "Нет данных"
+        # ИСПРАВЛЕНО: возвращаемся к исходной странице
+        print(f"   Возврат к исходной странице: {original_url}")
+        try:
+            driver.get(original_url)
+            time.sleep(1)  # Короткая пауза для стабилизации
+        except Exception as e:
+            print(f"   ⚠️ Ошибка возврата к исходной странице: {e}")
+        
+        return btc_price
+        
     except Exception as e:
         print(f"Ошибка парсинга BTC: {e}")
+        # ИСПРАВЛЕНО: возвращаемся к исходной странице даже при ошибке
+        if original_url:
+            try:
+                driver.get(original_url)
+            except:
+                pass
         return "Нет данных"
 
 
@@ -182,6 +213,12 @@ def get_currency_data(driver) -> Dict[str, str]:
     
     # Блокируем доступ к драйверу
     with _driver_lock:
+        original_url = None
+        try:
+            original_url = driver.current_url
+        except:
+            pass
+        
         try:
             print(f"💱 [Currency] Загрузка курсов ЦБ...")
             
@@ -270,8 +307,8 @@ def get_currency_data(driver) -> Dict[str, str]:
                 # Парсим фиат валюты
                 result = _parse_rates_fast(driver)
             
-            # Парсим BTC
-            btc_price = _parse_btc_price(driver)
+            # Парсим BTC с сохранением исходного URL
+            btc_price = _parse_btc_price(driver, original_url)
             result["BTC"] = btc_price
         
             # Сохраняем в кэш только если данные валидны
@@ -290,10 +327,22 @@ def get_currency_data(driver) -> Dict[str, str]:
             
         except TimeoutException:
             print("   ⚠️ Таймаут загрузки ЦБ")
+            # ИСПРАВЛЕНО: возвращаемся к исходной странице при таймауте
+            if original_url:
+                try:
+                    driver.get(original_url)
+                except:
+                    pass
             return {"USD": "Таймаут", "EUR": "Таймаут", "BTC": "Таймаут"}
             
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
+            # ИСПРАВЛЕНО: возвращаемся к исходной странице при ошибке
+            if original_url:
+                try:
+                    driver.get(original_url)
+                except:
+                    pass
             return {"USD": "Ошибка", "EUR": "Ошибка", "BTC": "Ошибка"}
 
 

@@ -6,7 +6,8 @@ import threading
 import webbrowser
 import re
 import time
-import google.generativeai as genai
+import requests
+import json
 
 
 class SearchPage(BasePage):
@@ -262,10 +263,10 @@ class SearchPage(BasePage):
             homepage = None
             
             if hasattr(self.controller, 'pages'):
-                homepage = self.controller.pages.get('HomePage')
+                homepage = self.controller.pages.get('home')
             
             if not homepage and hasattr(self.controller, 'frames'):
-                homepage = self.controller.frames.get('HomePage')
+                homepage = self.controller.frames.get('home')
             
             if not homepage and hasattr(self.controller, 'home_page'):
                 homepage = self.controller.home_page
@@ -348,8 +349,8 @@ class SearchPage(BasePage):
         if math_result:
             return math_result
         
-        # 6. ИИ для произвольных вопросов
-        ai_result = self._query_gemini(query, context)
+        # 6. ИИ для произвольных вопросов (OpenRouter вместо Gemini)
+        ai_result = self._query_openrouter(query, context)
         if ai_result:
             return ai_result
         
@@ -452,8 +453,45 @@ class SearchPage(BasePage):
         for link in web_links:
             self._create_link_card(link)
     
+    def _clean_text(self, text: str) -> str:
+        """
+        ИСПРАВЛЕНО: Очистка текста от лишних символов и форматирования
+        """
+        if not text:
+            return ""
+        
+        # Убираем markdown-разметку
+        text = re.sub(r'\*\*', '', text)  # Жирный текст **text**
+        text = re.sub(r'\*', '', text)     # Курсив *text*
+        text = re.sub(r'`', '', text)      # Код `text`
+        text = re.sub(r'#+ ', '', text)    # Заголовки # ## ###
+        
+        # Убираем ссылки в markdown-формате [text](url) → text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        
+        # Убираем HTML-теги
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Нормализуем переносы строк
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Убираем множественные пробелы
+        text = re.sub(r' +', ' ', text)
+        
+        # Убираем множественные переносы строк (оставляем максимум 2)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Убираем пробелы в начале и конце строк
+        lines = [line.strip() for line in text.split('\n')]
+        text = '\n'.join(lines)
+        
+        # Убираем пробелы в начале и конце всего текста
+        text = text.strip()
+        
+        return text
+    
     def _create_quick_answer_card(self, answer: Dict):
-        """Создать карточку краткой сводки"""
+        """Создать карточку краткой сводки с кнопкой копирования"""
         colors = {
             "currency": "#00C853",
             "converter": "#00C853",
@@ -475,6 +513,9 @@ class SearchPage(BasePage):
             "ai": "🤖"
         }
         icon = icons.get(answer["type"], "💡")
+        
+        # ИСПРАВЛЕНО: очищаем текст ответа
+        clean_content = self._clean_text(answer.get("content", ""))
         
         # Карточка сводки
         card = ctk.CTkFrame(
@@ -509,22 +550,38 @@ class SearchPage(BasePage):
             corner_radius=10
         ).pack(side="right", padx=(10, 0))
         
-        # Содержимое
-        content = ctk.CTkLabel(
-            inner,
-            text=answer["content"],
-            font=("Arial", 27),
-            text_color="#FFFFFF",
-            wraplength=680,
-            justify="left"
-        )
-        content.pack(pady=15, anchor="w", padx=20)
+        # Содержимое — используем CTkTextbox для возможности выделения и копирования
+        content_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        content_frame.pack(pady=15, padx=20, fill="x")
         
-        # Кнопки
+        content_text = ctk.CTkTextbox(
+            content_frame,
+            font=("Arial", 24),
+            text_color="#FFFFFF",
+            fg_color="#2a2a2a",
+            corner_radius=10,
+            height=150,
+            wrap="word",
+            activate_scrollbars=True
+        )
+        content_text.pack(fill="x", expand=True)
+        content_text.insert("1.0", clean_content)
+        content_text.configure(state="disabled")  # Только для чтения, но можно выделять
+        
+        # ИСПРАВЛЕНО: сохраняем полный текст для копирования
+        # Для ИИ-ответа используем полный сохраненный ответ, для остальных — текущий контент
+        if answer.get("type") == "ai" and hasattr(self, '_full_ai_answer'):
+            full_text_to_copy = self._full_ai_answer
+        else:
+            full_text_to_copy = clean_content
+        
+        self._last_answer_text = full_text_to_copy
+        
+        # Кнопки действий
+        btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        btn_frame.pack(pady=(0, 20), anchor="w", padx=20)
+        
         if answer.get("action"):
-            btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
-            btn_frame.pack(pady=(0, 20), anchor="w", padx=20)
-            
             action_btn = ctk.CTkButton(
                 btn_frame,
                 text=answer["action"],
@@ -538,19 +595,51 @@ class SearchPage(BasePage):
                 command=lambda a=answer: self._handle_quick_answer(a)
             )
             action_btn.pack(side="left")
+        
+        # ИСПРАВЛЕНО: кнопка копирования ответа — теперь копирует полный текст
+        copy_btn = ctk.CTkButton(
+            btn_frame,
+            text="📋 Копировать ответ",
+            font=("Arial", 21),
+            fg_color="transparent",
+            hover_color="#3a3a3a",
+            text_color="#888888",
+            height=68,
+            command=self._copy_last_answer
+        )
+        copy_btn.pack(side="left", padx=(10, 0))
+        
+        if answer.get("url"):
+            link_btn = ctk.CTkButton(
+                btn_frame,
+                text="🔗 Открыть ссылку",
+                font=("Arial", 21),
+                fg_color="transparent",
+                hover_color="#3a3a3a",
+                text_color="#888888",
+                height=68,
+                command=lambda u=answer["url"]: webbrowser.open(u)
+            )
+            link_btn.pack(side="left", padx=(10, 0))
+    
+    def _copy_last_answer(self):
+        """ИСПРАВЛЕНО: Копирование полного ответа в буфер обмена"""
+        if hasattr(self, '_last_answer_text') and self._last_answer_text:
+            self.clipboard_clear()
+            self.clipboard_append(self._last_answer_text)
+            self.update()
             
-            if answer.get("url"):
-                copy_btn = ctk.CTkButton(
-                    btn_frame,
-                    text="🔗 Копировать ссылку",
-                    font=("Arial", 21),
-                    fg_color="transparent",
-                    hover_color="#3a3a3a",
-                    text_color="#888888",
-                    height=68,
-                    command=lambda u=answer["url"]: self._copy_to_clipboard(u)
-                )
-                copy_btn.pack(side="left", padx=(10, 0))
+            # Показываем уведомление
+            notif = ctk.CTkLabel(
+                self,
+                text="✓ Ответ скопирован!",
+                font=("Arial", 21),
+                text_color="#00FF00",
+                fg_color="#2a2a2a",
+                corner_radius=10
+            )
+            notif.place(relx=0.5, rely=0.9, anchor="center")
+            self.after(1500, notif.destroy)
     
     def _create_link_card(self, link: Dict):
         """Создать карточку ссылки"""
@@ -590,11 +679,12 @@ class SearchPage(BasePage):
             except:
                 pass
         
-        # Сниппет
+        # Сниппет — ИСПРАВЛЕНО: очищаем текст
         if link.get("content"):
+            clean_snippet = self._clean_text(link["content"])
             ctk.CTkLabel(
                 card,
-                text=link["content"],
+                text=clean_snippet,
                 font=("Arial", 21),
                 text_color="#AAAAAA",
                 wraplength=680,
@@ -638,21 +728,25 @@ class SearchPage(BasePage):
         rtype = answer.get("type")
         
         if rtype in ["currency", "converter", "weather", "news"]:
-            self.controller.show_frame("HomePage")
+            self.controller.show_page("home")
         elif rtype == "ai":
-            # Для уточнения вопроса: сохраняем контекст и показываем подсказку
-            self.ai_context = answer.get("content", "")  # Сохраняем ответ как контекст
-            self.search_entry.delete(0, "end")
-            self.search_entry.focus()
-            # Подсвечиваем, что это уточнение
-            hint = ctk.CTkLabel(
-                self.content_frame,
-                text="💬 Режим уточнения (введите дополнительный вопрос)",
-                font=("Arial", 18),
-                text_color="#00FF00"
-            )
-            hint.pack(pady=5)
-            self.after(3000, hint.destroy)  # Удалить подсказку через 3 секунды
+            # ИСПРАВЛЕНО: проверяем, есть ли сохраненный полный ответ
+            if hasattr(self, '_full_ai_answer') and self._full_ai_answer:
+                # Открываем большое окно с полным ответом
+                self._show_full_ai_response(self._last_ai_query, self._full_ai_answer)
+            else:
+                # Fallback: используем текущий контент
+                self.ai_context = answer.get("content", "")
+                self.search_entry.delete(0, "end")
+                self.search_entry.focus()
+                hint = ctk.CTkLabel(
+                    self.content_frame,
+                    text="💬 Режим уточнения (введите дополнительный вопрос)",
+                    font=("Arial", 18),
+                    text_color="#00FF00"
+                )
+                hint.pack(pady=5)
+                self.after(3000, hint.destroy)
         elif answer.get("url"):
             webbrowser.open(answer["url"])
     
@@ -877,8 +971,8 @@ class SearchPage(BasePage):
                 "type": "weather",
                 "title": f"Погода в {weather_data.get('city', city)}",
                 "content": f"{weather_data.get('temp', '--')}, {weather_data.get('desc', 'Нет данных')}\n"
-                          f"💨 Ветер: {weather_data.get('wind', '--')}\n"
-                          f"💧 Влажность: {weather_data.get('humidity', '--')}",
+                          f"Ветер: {weather_data.get('wind', '--')}\n"
+                          f"Влажность: {weather_data.get('humidity', '--')}",
                 "data": weather_data,
                 "action": "Подробнее"
             }
@@ -1179,34 +1273,239 @@ class SearchPage(BasePage):
         print(f"[Search] Найдено {len(results)} веб-результатов")
         return results
     
-    def _query_gemini(self, query: str, context: Optional[str] = None) -> Optional[Dict]:
-        """Запрос к Google Gemini для произвольных вопросов"""
+    def _query_openrouter(self, query: str, context: Optional[str] = None) -> Optional[Dict]:
+        """Запрос к OpenRouter API для произвольных вопросов"""
         try:
             import config
-            if not config.GEMINI_API_KEY:
-                print("[Search] GEMINI_API_KEY не найден")
+            
+            # Проверяем, что используем OpenRouter и есть ключ
+            if config.USE_AI_PROVIDER != "openrouter" or not config.OPENROUTER_API_KEY:
+                print("[Search] OpenRouter не настроен")
                 return None
             
-            genai.configure(api_key=config.GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            
-            # Если есть контекст, это уточнение
+            # Формируем промпт
             if context:
                 prompt = f"Коротко я ответил на вопрос:\n\"{context}\"\n\nТеперь пользователь уточняет: \"{query}\"\n\nОтвети на уточнение на русском языке, как продолжение предыдущего ответа. Будь полезным и информативным."
             else:
                 prompt = f"Ответь кратко и точно на русском языке на вопрос: {query}. Будь полезным и информативным."
             
-            response = model.generate_content(prompt)
+            # Запрос к OpenRouter API
+            headers = {
+                "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://quicktab.local",
+                "X-Title": "QuickTab"
+            }
             
-            if response and response.text:
-                answer = response.text.strip()
-                return {
-                    "type": "ai",
-                    "title": "🤖 ИИ-ответ",
-                    "content": answer,
-                    "action": "Задать уточнение"
-                }
+            data = {
+                "model": config.OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+            
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if "choices" in result and len(result["choices"]) > 0:
+                    answer = result["choices"][0]["message"]["content"].strip()
+                    # ИСПРАВЛЕНО: сохраняем полный ответ, но НЕ показываем окно сразу
+                    self._full_ai_answer = answer
+                    self._last_ai_query = query
+                    
+                    return {
+                        "type": "ai",
+                        "title": "ИИ-ответ",
+                        "content": answer[:300] + "..." if len(answer) > 300 else answer,  # Краткая версия
+                        "action": "Показать полный ответ"  # Кнопка для открытия окна
+                    }
+            else:
+                print(f"[Search] Ошибка OpenRouter: {response.status_code} - {response.text}")
+                
         except Exception as e:
-            print(f"[Search] Ошибка Gemini: {e}")
-            return None
+            print(f"[Search] Ошибка OpenRouter: {e}")
+            
         return None
+    
+    def _show_full_ai_response(self, query: str, answer: str):
+        """УВЕЛИЧЕННОЕ диалоговое окно для полного ИИ-ответа"""
+        # Создаем большое диалоговое окно
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Ответ на: {query[:50]}{'...' if len(query) > 50 else ''}")
+        
+        # УВЕЛИЧЕННЫЙ размер окна
+        dialog.geometry("1400x900")
+        dialog.minsize(1200, 800)
+        dialog.transient(self)
+        
+        # ИСПРАВЛЕНО: откладываем grab_set() пока окно не станет видимым
+        def set_grab():
+            try:
+                dialog.grab_set()
+            except Exception as e:
+                print(f"[Search] grab_set failed: {e}")
+        
+        # Центрируем окно
+        dialog.update_idletasks()
+        screen_width = dialog.winfo_screenwidth()
+        screen_height = dialog.winfo_screenheight()
+        x = (screen_width - 1400) // 2
+        y = (screen_height - 900) // 2
+        dialog.geometry(f"1400x900+{x}+{y}")
+        
+        # Заголовок с УВЕЛИЧЕННЫМ шрифтом
+        header_frame = ctk.CTkFrame(dialog, fg_color="#2a2a2a")
+        header_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(
+            header_frame,
+            text="🤖 ИИ-ответ",
+            font=("Arial", 42, "bold"),
+            text_color="#FF6D00"
+        ).pack(pady=15)
+        
+        ctk.CTkLabel(
+            header_frame,
+            text=f"Вопрос: {query}",
+            font=("Arial", 24),
+            text_color="#888888",
+            wraplength=1300
+        ).pack(pady=(0, 10))
+        
+        # Область текста с УВЕЛИЧЕННЫМ шрифтом
+        content_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        text_widget = ctk.CTkTextbox(
+            content_frame,
+            font=("Arial", 22),
+            text_color="#FFFFFF",
+            fg_color="#1a1a1a",
+            corner_radius=15,
+            wrap="word",
+            activate_scrollbars=True
+        )
+        text_widget.pack(fill="both", expand=True)
+        
+        # Вставляем очищенный текст
+        clean_answer = self._clean_text(answer)
+        text_widget.insert("1.0", clean_answer)
+        text_widget.configure(state="disabled")
+        
+        # Кнопки действий с УВЕЛИЧЕННЫМИ шрифтами
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=20)
+        
+        # Кнопка копирования
+        copy_btn = ctk.CTkButton(
+            btn_frame,
+            text="📋 Копировать весь ответ",
+            font=("Arial", 28, "bold"),
+            fg_color="#00AAFF",
+            hover_color="#0088DD",
+            text_color="#000000",
+            height=70,
+            width=350,
+            corner_radius=15,
+            command=lambda: self._copy_full_answer(clean_answer, dialog)
+        )
+        copy_btn.pack(side="left", padx=(0, 15))
+        
+        # Кнопка закрытия
+        close_btn = ctk.CTkButton(
+            btn_frame,
+            text="✓ Закрыть",
+            font=("Arial", 28, "bold"),
+            fg_color="#444444",
+            hover_color="#666666",
+            height=70,
+            width=200,
+            corner_radius=15,
+            command=dialog.destroy
+        )
+        close_btn.pack(side="left")
+        
+        # Кнопка уточнения
+        clarify_btn = ctk.CTkButton(
+            btn_frame,
+            text="💬 Уточнить",
+            font=("Arial", 28, "bold"),
+            fg_color="#FF6D00",
+            hover_color="#FF8C00",
+            text_color="#000000",
+            height=70,
+            width=200,
+            corner_radius=15,
+            command=lambda: self._start_clarification(query, answer, dialog)
+        )
+        clarify_btn.pack(side="right")
+        
+        # ИСПРАВЛЕНО: используем after() для grab_set() после отрисовки
+        dialog.after(100, set_grab)
+        
+        # Фокус на окно
+        dialog.focus_set()
+        dialog.lift()
+    
+    def _copy_full_answer(self, text: str, dialog=None):
+        """Копирование полного ответа"""
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()
+        
+        # Уведомление внутри диалога
+        notif = ctk.CTkLabel(
+            dialog or self,
+            text="✓ Ответ скопирован!",
+            font=("Arial", 28, "bold"),  # УВЕЛИЧЕНО
+            text_color="#00FF00",
+            fg_color="#2a2a2a",
+            corner_radius=15
+        )
+        notif.place(relx=0.5, rely=0.1, anchor="center")
+        if dialog:
+            dialog.after(2000, notif.destroy)
+        else:
+            self.after(2000, notif.destroy)
+    
+    def _start_clarification(self, original_query: str, answer: str, dialog=None):
+        """Начать уточнение вопроса"""
+        if dialog:
+            dialog.destroy()
+        
+        # Сохраняем контекст
+        self.ai_context = answer
+        self.search_entry.delete(0, "end")
+        self.search_entry.insert(0, f"Уточнение: ")
+        self.search_entry.focus()
+        self.search_entry.icursor("end")
+        
+        # Показываем подсказку
+        self.show_start_screen()
+        hint_frame = ctk.CTkFrame(self.content_frame, fg_color="#2a2a2a", corner_radius=15)
+        hint_frame.pack(pady=20, fill="x", padx=5)
+        
+        ctk.CTkLabel(
+            hint_frame,
+            text="💬 Режим уточнения",
+            font=("Arial", 30, "bold"),  # УВЕЛИЧЕНО
+            text_color="#00FF00"
+        ).pack(pady=10)
+        
+        ctk.CTkLabel(
+            hint_frame,
+            text=f"Предыдущий вопрос: {original_query[:60]}{'...' if len(original_query) > 60 else ''}\n"
+                 f"Введите дополнительный вопрос для уточнения",
+            font=("Arial", 22),  # УВЕЛИЧЕНО
+            text_color="#AAAAAA"
+        ).pack(pady=10)
+        
+        self.after(5000, hint_frame.destroy)
