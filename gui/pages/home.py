@@ -422,7 +422,7 @@ class HomePage(BasePage):
         })
     
     def _create_fav_card(self, index: int, data: dict):
-        """Создает заполненную карточку сайта"""
+        """Создает заполненную карточку сайта с улучшенными кнопками"""
         row = index // 3
         col = index % 3
         
@@ -457,126 +457,142 @@ class HomePage(BasePage):
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=15, pady=12)
         
+        # ЛЕВАЯ ЧАСТЬ: Иконка и текст
+        left_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        left_frame.pack(side="left", fill="both", expand=True)
+        
         # Иконка (emoji или первая буква)
         icon_text = data.get("icon", "")
         if not icon_text:
             icon_text = data.get("title", "S")[0].upper()
         
         icon_frame = ctk.CTkFrame(
-            inner,
+            left_frame,
             fg_color=color,
             corner_radius=12,
-            width=50,
-            height=50
+            width=70,
+            height=70
         )
-        icon_frame.pack(side="left", padx=(0, 15))
+        icon_frame.pack(side="left", padx=(0, 12))
         icon_frame.pack_propagate(False)
         
         icon_label = ctk.CTkLabel(
             icon_frame,
             text=icon_text,
-            font=("Arial", 24),
+            font=("Arial", 32),
             text_color="white"
         )
         icon_label.place(relx=0.5, rely=0.5, anchor="center")
         
         # Текстовая часть
-        text_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        text_frame.pack(side="left", fill="both", expand=True)
+        text_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        text_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
         title = ctk.CTkLabel(
             text_frame,
             text=data.get("title", "Без названия"),
-            font=("Arial", 18, "bold"),
+            font=("Arial", 24, "bold"),
             text_color="white",
             anchor="w"
         )
         title.pack(fill="x")
         
-        url_short = data.get("url", "").replace("https://", "").replace("http://", "")[:25]
-        if len(url_short) > 25:
+        url_short = data.get("url", "").replace("https://", "").replace("http://", "")[:22]
+        if len(url_short) > 22:
             url_short += "..."
         
         url_label = ctk.CTkLabel(
             text_frame,
             text=url_short,
-            font=("Arial", 12),
+            font=("Arial", 18),
             text_color="#888888",
             anchor="w"
         )
         url_label.pack(fill="x")
         
-        # Кнопки действий (в правом верхнем углу карточки)
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.place(relx=0.98, rely=0.05, anchor="ne")
+        # ПРАВАЯ ЧАСТЬ: Кнопки действий в ряд
+        btn_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        btn_frame.pack(side="right", fill="y")
         
-        # Кнопка открытия
+        # Стиль для всех кнопок
+        btn_config = {
+            "width": 50,
+            "height": 50,
+            "corner_radius": 18,
+            "font": ("Arial", 16),
+            "border_width": 0
+        }
+        
+        # Кнопка открытия (самая заметная)
         open_btn = ctk.CTkButton(
             btn_frame,
             text="↗",
-            width=45,
-            height=45,
-            corner_radius=22,
-            fg_color="#3A3A3A",
-            hover_color=color,
-            text_color="white",
-            font=("Arial", 24, "bold"),
+            fg_color=color,
+            hover_color="#FFFFFF",
+            text_color="#1A1A1A",
+            **btn_config,
             command=lambda: self._open_favorite(index)
         )
-        open_btn.pack(pady=2)
+        open_btn.pack(side="left", padx=2)
         
         # Кнопка редактирования
         edit_btn = ctk.CTkButton(
             btn_frame,
             text="✎",
-            width=45,
-            height=45,
-            corner_radius=22,
             fg_color="#3A3A3A",
             hover_color="#FFA500",
-            text_color="white",
-            font=("Arial", 20),
+            text_color="#CCCCCC",
+            **btn_config,
             command=lambda: self._edit_favorite(index)
         )
-        edit_btn.pack(pady=2)
+        edit_btn.pack(side="left", padx=2)
         
         # Кнопка удаления
         delete_btn = ctk.CTkButton(
             btn_frame,
-            text="🗑",
-            width=45,
-            height=45,
-            corner_radius=22,
+            text="✕",
             fg_color="#3A3A3A",
             hover_color="#FF5252",
-            text_color="white",
-            font=("Arial", 20),
+            text_color="#CCCCCC",
+            **btn_config,
             command=lambda: self._remove_favorite(index)
         )
-        delete_btn.pack(pady=2)
+        delete_btn.pack(side="left", padx=2)
         
-        # Hover эффекты для карточки
+        # Hover эффекты для всей карточки
         def on_enter(e):
             card.configure(fg_color="#333333", border_width=4)
-            open_btn.configure(text_color="white")
-            edit_btn.configure(text_color="white")
-            delete_btn.configure(text_color="white")
+            # Подсвечиваем все кнопки
+            edit_btn.configure(fg_color="#4A4A4A")
+            delete_btn.configure(fg_color="#4A4A4A")
         
         def on_leave(e):
             card.configure(fg_color="#2A2A2A", border_width=3)
-            open_btn.configure(text_color="#888888")
-            edit_btn.configure(text_color="#888888")
-            delete_btn.configure(text_color="#888888")
+            # Возвращаем цвет кнопок
+            edit_btn.configure(fg_color="#3A3A3A")
+            delete_btn.configure(fg_color="#3A3A3A")
         
         card.bind("<Enter>", on_enter)
         card.bind("<Leave>", on_leave)
         
-        # Клик по карточке открывает сайт
-        card.bind("<Button-1>", lambda e: self._open_favorite(index))
-        inner.bind("<Button-1>", lambda e: self._open_favorite(index))
-        text_frame.bind("<Button-1>", lambda e: self._open_favorite(index))
+        # Клик по основной части открывает сайт
+        def on_click(e):
+            # Проверяем, что клик не по кнопкам
+            widget = e.widget
+            # Если клик был по кнопке или её дочернему элементу - не открываем
+            if "button" in str(widget).lower():
+                return
+            self._open_favorite(index)
         
-        # Создаем или обновляем запись в списке
+        card.bind("<Button-1>", on_click)
+        left_frame.bind("<Button-1>", on_click)
+        text_frame.bind("<Button-1>", on_click)
+        icon_frame.bind("<Button-1>", on_click)
+        icon_label.bind("<Button-1>", on_click)
+        title.bind("<Button-1>", on_click)
+        url_label.bind("<Button-1>", on_click)
+        
+        # Сохраняем в список
         card_info = {
             "frame": card,
             "type": "filled",
@@ -584,30 +600,12 @@ class HomePage(BasePage):
             "index": index
         }
         
-        # ИСПРАВЛЕНИЕ: используем append или insert вместо прямого присвоения
         if index < len(self.fav_cards):
             self.fav_cards[index] = card_info
         else:
-            # Расширяем список до нужного размера
             while len(self.fav_cards) < index:
                 self.fav_cards.append(None)
             self.fav_cards.append(card_info)
-        
-        card.bind("<Enter>", on_enter)
-        card.bind("<Leave>", on_leave)
-        
-        # Клик по карточке открывает сайт
-        card.bind("<Button-1>", lambda e: self._open_favorite(index))
-        inner.bind("<Button-1>", lambda e: self._open_favorite(index))
-        text_frame.bind("<Button-1>", lambda e: self._open_favorite(index))
-        
-        # Обновляем данные
-        self.fav_cards[index] = {
-            "frame": card,
-            "type": "filled",
-            "data": data,
-            "index": index
-        }
     
     def _show_add_favorite_dialog(self, edit_index: int = None):
         """Диалог добавления/редактирования избранного"""
