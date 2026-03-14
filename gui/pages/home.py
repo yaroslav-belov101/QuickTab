@@ -564,9 +564,34 @@ class HomePage(BasePage):
         
         def on_leave(e):
             card.configure(fg_color="#2A2A2A", border_width=3)
-            open_btn.configure(text_color="transparent")
-            edit_btn.configure(text_color="transparent")
-            delete_btn.configure(text_color="transparent")
+            open_btn.configure(text_color="#888888")
+            edit_btn.configure(text_color="#888888")
+            delete_btn.configure(text_color="#888888")
+        
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
+        
+        # Клик по карточке открывает сайт
+        card.bind("<Button-1>", lambda e: self._open_favorite(index))
+        inner.bind("<Button-1>", lambda e: self._open_favorite(index))
+        text_frame.bind("<Button-1>", lambda e: self._open_favorite(index))
+        
+        # Создаем или обновляем запись в списке
+        card_info = {
+            "frame": card,
+            "type": "filled",
+            "data": data,
+            "index": index
+        }
+        
+        # ИСПРАВЛЕНИЕ: используем append или insert вместо прямого присвоения
+        if index < len(self.fav_cards):
+            self.fav_cards[index] = card_info
+        else:
+            # Расширяем список до нужного размера
+            while len(self.fav_cards) < index:
+                self.fav_cards.append(None)
+            self.fav_cards.append(card_info)
         
         card.bind("<Enter>", on_enter)
         card.bind("<Leave>", on_leave)
@@ -769,33 +794,50 @@ class HomePage(BasePage):
         """Сохранить избранное в файл"""
         try:
             config_dir = os.path.join(os.path.expanduser("~"), ".quicktab")
-            os.makedirs(config_dir, exist_ok=True)
+            os.makedirs(config_dir, exist_ok=True)  # ← создаём все родительские папки
             
-            with open(os.path.join(config_dir, "favorites.json"), "w", encoding="utf-8") as f:
+            filepath = os.path.join(config_dir, "favorites.json")
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(self.favorites_data, f, ensure_ascii=False, indent=2)
+                
+            print(f"✅ Saved {len(self.favorites_data)} favorites to {filepath}")
+            
         except Exception as e:
-            print(f"Ошибка сохранения избранного: {e}")
+            print(f"❌ Ошибка сохранения избранного: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _load_favorites(self):
         """Загрузить избранное из файла"""
         try:
+            # Очищаем старые карточки
+            for card in self.fav_cards:
+                if card and "frame" in card:
+                    card["frame"].destroy()
+            self.fav_cards = []
+            
             config_path = os.path.join(os.path.expanduser("~"), ".quicktab", "favorites.json")
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
                     self.favorites_data = json.load(f)
-                    
-                # Создаем карточки для загруженных данных
-                for i, data in enumerate(self.favorites_data[:6]):
-                    self._create_fav_card(i, data)
-                
-                # Создаем пустые слоты для оставшихся
-                for i in range(len(self.favorites_data), 6):
-                    self._create_empty_fav_slot(i)
             else:
                 self.favorites_data = []
+            
+            # Создаем все карточки заново
+            for i in range(6):
+                if i < len(self.favorites_data):
+                    self._create_fav_card(i, self.favorites_data[i])
+                else:
+                    self._create_empty_fav_slot(i)
+                    
         except Exception as e:
             print(f"Ошибка загрузки избранного: {e}")
+            import traceback
+            traceback.print_exc()
             self.favorites_data = []
+            self.fav_cards = []
+            for i in range(6):
+                self._create_empty_fav_slot(i)
     
     def _create_history_section(self):
         """История запросов — 5 полей"""
