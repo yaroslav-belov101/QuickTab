@@ -25,7 +25,6 @@ class Dashboard(ctk.CTkFrame):
         self.menu_buttons: Dict[str, ctk.CTkButton] = {}
         
         self.create_header()
-        self.create_stats()
         self.create_menu()
         self.create_footer()
     
@@ -41,51 +40,7 @@ class Dashboard(ctk.CTkFrame):
         ctk.CTkLabel(header, text="Быстрый доступ к инфо", 
                     font=("Arial", 16),
                     text_color="#666666").pack()
-    
-    def create_stats(self):
-        """Статистика - фиксированная высота"""
-        stats = ctk.CTkFrame(self, fg_color="#1A1A1A", corner_radius=15, height=140)
-        stats.pack(fill="x", padx=15, pady=(0, 5))
-        stats.pack_propagate(False)
-        
-        ctk.CTkLabel(stats, text="📊 Статистика", 
-                    font=("Arial", 18, "bold"),
-                    text_color="white").pack(anchor="w", padx=15, pady=(10, 5))
-        
-        grid = ctk.CTkFrame(stats, fg_color="transparent")
-        grid.pack(fill="x", padx=15, pady=(0, 10), expand=True)
-        grid.grid_columnconfigure((0, 1), weight=1)
-        
-        # Запросы
-        req_frame = ctk.CTkFrame(grid, fg_color="#0D0D0D", corner_radius=10)
-        req_frame.grid(row=0, column=0, padx=(0, 5), sticky="nsew")
-        
-        self.requests_num = ctk.CTkLabel(req_frame, text="0", 
-                                        font=("Arial", 32, "bold"),
-                                        text_color="#00AAFF")
-        self.requests_num.pack(pady=(10, 0))
-        ctk.CTkLabel(req_frame, text="Запросов", 
-                    font=("Arial", 14),
-                    text_color="#888888").pack(pady=(0, 10))
-        
-        # В кэше
-        cache_frame = ctk.CTkFrame(grid, fg_color="#0D0D0D", corner_radius=10)
-        cache_frame.grid(row=0, column=1, padx=(5, 0), sticky="nsew")
-        
-        self.cached_num = ctk.CTkLabel(cache_frame, text="0", 
-                                      font=("Arial", 32, "bold"),
-                                      text_color="#00C853")
-        self.cached_num.pack(pady=(10, 0))
-        ctk.CTkLabel(cache_frame, text="В кэше", 
-                    font=("Arial", 14),
-                    text_color="#888888").pack(pady=(0, 10))
-    
-    def update_stats(self, requests: int = None, cached: int = None):
-        """Обновить статистику"""
-        if requests is not None:
-            self.requests_num.configure(text=str(requests))
-        if cached is not None:
-            self.cached_num.configure(text=str(cached))
+
     
     def create_menu(self):
         """Навигация - НЕ растягивается, фиксированная позиция"""

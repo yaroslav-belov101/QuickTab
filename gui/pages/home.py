@@ -274,27 +274,32 @@ class HomePage(BasePage):
             self.news_items_widgets.append(widget)
     
     def _create_news_item(self, index: int):
-        """Элемент новости УМЕНЬШЕННЫЙ"""
+        """Элемент новости — выровненный"""
         item = ctk.CTkFrame(self.news_list, fg_color="transparent", height=80)
         item.pack(fill="x", pady=5)
         item.pack_propagate(False)
         
+        # Индикатор слева
         indicator = ctk.CTkFrame(item, fg_color="gray", width=6, corner_radius=3)
         indicator.pack(side="left", fill="y", padx=(0, 15))
         
+        # Контейнер для текста
         text_frame = ctk.CTkFrame(item, fg_color="transparent")
         text_frame.pack(side="left", fill="both", expand=True)
         
+        # Заголовок новости — ИСПРАВЛЕНО
         title_label = ctk.CTkLabel(
             text_frame,
             text="Загрузка...",
             font=("Arial", 24),
             text_color="white",
-            anchor="w",
-            wraplength=800
+            anchor="w",  # Выравнивание по левому краю
+            wraplength=650,  # Уменьшено для лучшей читаемости
+            justify="left"  # Явное указание выравнивания
         )
-        title_label.pack(fill="x", pady=(10, 3))
+        title_label.pack(fill="x", pady=(10, 3), padx=0)
         
+        # Время публикации
         time_label = ctk.CTkLabel(
             text_frame,
             text="",
@@ -304,6 +309,7 @@ class HomePage(BasePage):
         )
         time_label.pack(fill="x")
         
+        # Кнопка открытия
         open_btn = ctk.CTkButton(
             item, text="→", width=50, height=50,
             corner_radius=25,
@@ -1010,27 +1016,33 @@ class HomePage(BasePage):
                 print(f"[UI] {code} обновлен: {rate}")
     
     def _update_news_ui(self, items: list, topic: str):
-        """Обновить новости"""
+        """Обновить новости — с правильным выравниванием"""
         print(f"[UI] Обновление новостей {topic}: {len(items)} шт")
-        colors = {"cyber": "#FF5252", "politics": "#448AFF", 
-                 "economy": "#00C853", "tech": "#FF9100"}
+        
+        colors = {"cyber": "#FF5252", "politics": "#448AFF",
+                "economy": "#00C853", "tech": "#FF9100"}
         color = colors.get(topic, "gray")
         
         if topic != self.current_news_topic:
             return
         
+        # Очистка всех виджетов
         for widget in self.news_items_widgets:
             widget["title"].configure(text="")
             widget["time"].configure(text="")
             widget["indicator"].configure(fg_color="gray")
             widget["url"] = None
         
+        # Заполнение новостями
         for i, item in enumerate(items[:5]):
             if i < len(self.news_items_widgets):
                 widget = self.news_items_widgets[i]
                 title = item.get("title", "")
+                
+                # Обрезаем слишком длинные заголовки
                 if len(title) > 100:
                     title = title[:97] + "..."
+                
                 widget["title"].configure(text=title)
                 widget["time"].configure(text="Только что")
                 widget["indicator"].configure(fg_color=color)
@@ -1116,3 +1128,26 @@ class HomePage(BasePage):
             url = self.news_items_widgets[index].get("url")
             if url and url.startswith("http"):
                 webbrowser.open(url)
+
+    def on_theme_changed(self):
+        """Обработка смены темы"""
+        # Обновляем цвета всех виджетов
+        theme = ctk.get_appearance_mode()
+        
+        # Обновляем фоны карточек
+        bg_color = "#FFFFFF" if theme == "light" else "#2A2A2A"
+        text_color = "#1A1A1A" if theme == "light" else "#FFFFFF"
+        
+        # Обновляем виджеты
+        if hasattr(self, 'weather_frame'):
+            self.weather_frame.configure(fg_color="#1E3A5F")  # Погода сохраняет свой цвет
+        
+        # Перерисовываем валютные карточки
+        for code, card_data in self.currency_cards.items():
+            card_data["rate"].configure(text_color=text_color)
+
+    def on_color_changed(self, new_color: str):
+        """Обработка смены акцентного цвета"""
+        # Обновляем кнопки и индикаторы
+        if hasattr(self, 'fab'):
+            self.fab.configure(fg_color=new_color, hover_color=new_color)
