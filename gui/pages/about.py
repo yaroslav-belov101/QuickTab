@@ -23,7 +23,7 @@ class AboutPage(BasePage):
         
         name_label = ctk.CTkLabel(
             header_frame,
-            text="QuickTab v0.7.0",
+            text="QuickTab v1.0.0",
             font=("Arial", 48, "bold"),
             text_color="#FFFFFF"
         )
@@ -133,7 +133,7 @@ class AboutPage(BasePage):
         
         update_btn = ctk.CTkButton(
             button_frame,
-            text="🔄 Версия 0.7.0 (актуальная)",
+            text="🔄 Версия v1.0.0 (актуальная)",
             command=self.check_updates,
             fg_color="#00AAFF",
             hover_color="#0088CC",
@@ -184,7 +184,7 @@ class AboutPage(BasePage):
         
         msgbox.showinfo(
             "Версия",
-            "QuickTab v0.7.0\n\n"
+            "QuickTab v1.0.0\n\n"
             "✅ У вас установлена последняя версия!\n\n"
             "Спасибо за использование приложения! ⭐"
         )

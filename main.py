@@ -1,10 +1,3 @@
-# main.py — точка входа в приложение QuickTab
-#!/usr/bin/env python3
-"""
-QuickTab v0.8.0 — быстрый доступ к информации
-Главный файл запуска приложения
-"""
-
 import sys
 import os
 
@@ -16,7 +9,7 @@ from gui.app import QuickTabGUI
 
 def main():
     """Главная функция запуска приложения"""
-    print("🚀 Запуск QuickTab v0.8.0...")
+    print("🚀 Запуск QuickTab v1.0.0...")
     print("=" * 50)
     
     try:

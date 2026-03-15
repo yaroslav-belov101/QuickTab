@@ -32,7 +32,7 @@ class QuickTabGUI(ctk.CTk):
         try:
             from quicktab import __version__
         except ImportError:
-            __version__ = "0.7.0"
+            __version__ = "1.0.0"
         self.version = __version__
         
         # Обновляем заголовок с версией
